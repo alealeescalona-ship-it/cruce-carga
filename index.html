@@ -114,8 +114,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <span class="dchip miss" id="chipSap" onclick="openUpload()">🏭 078: sin datos</span>
       <span class="dchip miss" id="chipTrans" onclick="openUpload()">🚚 Transporte: sin datos</span>
       <button class="btn" onclick="openUpload()">⬆ Subir</button>
-      <button class="btn" onclick="exportExcel()">⬇ Excel</button>
-      <button class="btn" onclick="exportPDF()">⬇ PDF</button>
+      <button class="btn" onclick="exportExcel()" title="Libro Excel con todas las hojas">⬇ Excel</button>
+      <button class="btn" onclick="exportPDF()" title="PDF de la pestaña actual">⬇ PDF</button>
     </div>
     <span class="sub" id="subline">Sube tus archivos para armar el cruce automático.</span>
   </header>
@@ -782,11 +782,12 @@ function ingestDetalle(aoa, fname){
 
 function ingest078(aoa, fname, nuevo){
   const heads = aoa[0].map(norm);
-  let cant = -1, fec = -1; const centros = [];
+  let cant = -1, fec = -1, ce = -1; const centros = [];
   heads.forEach((h, i) => {
     if (h === 'cantidad' && cant < 0) cant = i;
     if (h === 'centro') centros.push(i);
     if (h === 'fe.contab.' && fec < 0) fec = i;
+    if (h === 'ce.' && ce < 0) ce = i;
   });
   const cPl = centros[0];
   const c2 = centros.length > 1 ? centros[centros.length - 1] : centros[0];
@@ -797,8 +798,15 @@ function ingest078(aoa, fname, nuevo){
     const q = numv(a[cant]);
     let k = String(a[c2] == null ? '' : a[c2]).trim().replace(/\.0$/, '');
     if (k === '') k = '(sin centro)';
-    const plRaw = norm(a[cPl]);
-    const pl = plRaw.includes('maule') ? 'Maule' : (plRaw.includes('valdivia') ? 'Valdivia' : 'Otra');
+    // Planta emisora: columna 'Ce.' (1801 = Maule, 1802 = Valdivia); si no viene, por el texto del primer 'Centro'
+    const ceVal = ce >= 0 ? String(a[ce] == null ? '' : a[ce]).trim().replace(/\.0$/, '') : '';
+    let pl;
+    if (ceVal === '1801') pl = 'Maule';
+    else if (ceVal === '1802') pl = 'Valdivia';
+    else {
+      const plRaw = norm(cPl !== undefined ? a[cPl] : '');
+      pl = plRaw.includes('maule') ? 'Maule' : (plRaw.includes('valdivia') ? 'Valdivia' : 'Otra');
+    }
     SAP.by[k] = (SAP.by[k] || 0) + q;
     if (!SAP.byPl[pl]) SAP.byPl[pl] = {};
     SAP.byPl[pl][k] = (SAP.byPl[pl][k] || 0) + q;
@@ -817,7 +825,8 @@ function destKeyTrans(cod, nombre){
   if (n.includes('marinetti')) return {key: 'MARINETTI', code: null};
   if (n.includes('vera y giannini') || n === 'vera') return {key: 'VERA', code: null};
   if (n.includes('edipac')) return {key: 'EDIPAC', code: null};
-  return {key: String(nombre == null ? '' : nombre).trim() || String(cod || '').trim(), code: m ? m[1] : null};
+  const limpio = String(nombre == null ? '' : nombre).trim().replace(/\s+/g, ' ');
+  return {key: limpio || String(cod || '').trim(), code: m ? m[1] : null};
 }
 
 function ingestTransporte(aoa, fname){
@@ -830,7 +839,7 @@ function ingestTransporte(aoa, fname){
   let anuladas = 0, otrasZonas = 0, otrosOrig = 0, tomadas = 0, fecha = '';
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r]; if (!a) continue;
-    const ori = String(a[ciOri] || '').trim().toUpperCase();
+    const ori = String(a[ciOri] || '').trim().toUpperCase().replace(/\s+/g, ' ');
     const pl = ori === 'CA MAULE PT' ? 'Maule' : (ori === 'CA VALDIVIA PT' ? 'Valdivia' : '');
     if (!pl){ otrosOrig++; continue; }
     if (String(a[ciZona] || '').trim().toUpperCase() !== 'ZONA 1'){ otrasZonas++; continue; }
@@ -1314,45 +1323,124 @@ function resetPlan(){
 }
 
 // ================== EXPORTES ==================
+function alertaTxt(u){ return u === 'bad' ? 'VENCIDO' : (u === 'warn' ? 'URGENTE' : (u === 'soon' ? 'PROXIMO' : '')); }
+function prioAoa(){
+  const prio = [['Consolidador','Stk Maximo','Alerta','F corte doc','Nave','Maule t','Valdivia t']];
+  let pCur = null, pMa = 0, pVa = 0, pTm = 0, pTv = 0;
+  const pSub = () => { if (pCur !== null) prio.push(['Total ' + pCur, '', '', '', '', r3(pMa), r3(pVa)]); };
+  prioData().forEach(x => {
+    if (x.cons !== pCur){ pSub(); pCur = x.cons; pMa = 0; pVa = 0; }
+    prio.push([x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
+    pMa += x.ma; pVa += x.va; pTm += x.ma; pTv += x.va;
+  });
+  pSub();
+  if (prio.length > 1) prio.push(['TOTAL GENERAL', '', '', '', '', r3(pTm), r3(pTv)]);
+  return prio;
+}
+function resumenG(){
+  const map = {};
+  gPend().forEach(r => {
+    const o = map[r.nave] || (map[r.nave] = {nave: r.nave, cons: [], fcd: '', fzp: '', peds: new Set(), ma: 0, va: 0});
+    if (!o.cons.includes(r.cons)) o.cons.push(r.cons);
+    o.peds.add(r.ped); o.ma += r.ma; o.va += r.va;
+    if (r.fcd && (!o.fcd || r.fcd < o.fcd)) o.fcd = r.fcd;
+    if (r.fzp && (!o.fzp || r.fzp < o.fzp)) o.fzp = r.fzp;
+  });
+  const list = Object.values(map).sort((a, b) => (a.fcd + a.nave).localeCompare(b.fcd + b.nave));
+  const aoa = [['Nave','Consolidador','F corte doc','F zarpe','Pedidos','Maule t','Valdivia t']];
+  let tm = 0, tv = 0, tp = 0;
+  list.forEach(o => { aoa.push([o.nave, o.cons.join(' / '), o.fcd, o.fzp, o.peds.size, r3(o.ma), r3(o.va)]); tm += o.ma; tv += o.va; tp += o.peds.size; });
+  aoa.push(['TOTAL GENERAL', '', '', '', tp, r3(tm), r3(tv)]);
+  return aoa;
+}
+function resumenN(){
+  const map = {};
+  nRows().forEach(r => {
+    const k = r.cons + '||' + r.paisd;
+    const o = map[k] || (map[k] = {cons: r.cons, pais: r.paisd, fzp: '', peds: new Set(), ma: 0, va: 0});
+    o.peds.add(r.ped); o.ma += r.ma; o.va += r.va;
+    if (r.fzp && (!o.fzp || r.fzp < o.fzp)) o.fzp = r.fzp;
+  });
+  const list = Object.values(map).sort((a, b) => (a.cons + a.pais).localeCompare(b.cons + b.pais));
+  const aoa = [['Consolidador','Pais dest','Primer zarpe','Pedidos','Maule t','Valdivia t']];
+  let cur = null, sm = 0, sv = 0, sp = 0, tm = 0, tv = 0, tp = 0;
+  const sub = () => { if (cur !== null) aoa.push(['Total ' + cur, '', '', sp, r3(sm), r3(sv)]); };
+  list.forEach(o => {
+    if (o.cons !== cur){ sub(); cur = o.cons; sm = 0; sv = 0; sp = 0; }
+    aoa.push([o.cons, o.pais, o.fzp, o.peds.size, r3(o.ma), r3(o.va)]);
+    sm += o.ma; sv += o.va; sp += o.peds.size; tm += o.ma; tv += o.va; tp += o.peds.size;
+  });
+  sub();
+  aoa.push(['TOTAL GENERAL', '', '', tp, r3(tm), r3(tv)]);
+  return aoa;
+}
+function despAoa(){
+  const aoa = [['Centro','Destino','Maule t','Maule UT','Valdivia t','Valdivia UT','Total t']];
+  const codes = Object.keys(SAP.by);
+  const mapped = Object.keys(MAP078).filter(c => codes.includes(c));
+  let tm = 0, tv = 0, tt = 0;
+  mapped.forEach(c => {
+    const m = (SAP.byPl['Maule'] || {})[c] || 0, v = (SAP.byPl['Valdivia'] || {})[c] || 0;
+    tm += m; tv += v; tt += SAP.by[c];
+    aoa.push([c, MAP078[c], r3(m), r3(m / CFG.tDesp), r3(v), r3(v / CFG.tDesp), r3(SAP.by[c])]);
+  });
+  aoa.push(['Total centros de despacho', '', r3(tm), r3(tm / CFG.tDesp), r3(tv), r3(tv / CFG.tDesp), r3(tt)]);
+  codes.filter(c => !MAP078[c]).sort().forEach(c => aoa.push([c, 'otros movimientos', '', '', '', '', r3(SAP.by[c])]));
+  aoa.push(['TOTAL GENERAL 078', '', '', '', '', '', r3(SAP.total)]);
+  return aoa;
+}
+function transAoa(){
+  const aoa = [['Planta','Destino','Centro','UT programadas']];
+  let tot = 0;
+  ['Maule','Valdivia'].forEach(pl => {
+    const d = TRANS.byPl[pl] || {};
+    let st = 0;
+    Object.keys(d).sort((a, b) => d[b].ut - d[a].ut).forEach(k => { aoa.push([pl, k, d[k].code || '', d[k].ut]); st += d[k].ut; });
+    if (st){ aoa.push(['Total ' + pl, '', '', st]); tot += st; }
+  });
+  aoa.push(['TOTAL GENERAL zona 1', '', '', tot]);
+  return aoa;
+}
+function consAoa(pl){
+  const {porG, gest} = planAggs(pl);
+  const P = [['PUERTO CORONEL','PUERTO CORONEL'], ['DYC SAI','D&C SAI'], ['PC VALP','D&C VALPARAÍSO']];
+  const G = [['PUERTO CORONEL','PUERTO CORONEL'], ['DYC SAI','D&C SAI'], ['PC VALP','PTO COLUMBO VAP']];
+  const aoa = [['Status','Consolidador','Peso t','UT']];
+  let tp = 0, tg = 0;
+  P.forEach(([lbl, key]) => { const t = porG[key] || 0; tp += t; aoa.push(['Por gestionar', lbl, r3(t), r3(t / CFG.tPlan)]); });
+  aoa.push(['Total por gestionar', '', r3(tp), r3(tp / CFG.tPlan)]);
+  G.forEach(([lbl, key]) => { const t = gest[key] || 0; tg += t; aoa.push(['Gestionado', lbl, r3(t), r3(t / CFG.tPlan)]); });
+  aoa.push(['Total gestionado', '', r3(tg), r3(tg / CFG.tPlan)]);
+  aoa.push(['TOTAL', '', r3(tp + tg), r3((tp + tg) / CFG.tPlan)]);
+  return aoa;
+}
+function progAoa(pl){
+  const aoa = [['Destino','Centro','UT programadas','UT despachadas','UT por despachar','Ton por despachar','Remanente t','Q UT proxima oferta']];
+  let sp = 0, sd = 0, sr = 0;
+  planCalc(pl).rows.forEach(x => {
+    sp += x.prog; sd += x.desp; if (x.rem !== null) sr += x.rem;
+    aoa.push([x.k, x.code || '', r3(x.prog), r3(x.desp), r3(x.por), r3(x.ton), x.rem !== null ? r3(x.rem) : '', x.rem !== null ? r3(x.rem / CFG.tPlan) : '']);
+  });
+  aoa.push(['Total ' + pl, '', r3(sp), r3(sd), r3(sp - sd), r3((sp - sd) * CFG.tPlan), r3(sr), r3(sr / CFG.tPlan)]);
+  return aoa;
+}
 function buildExport(){
   const out = {};
   if (DET){
-    const alertaTxt = u => u === 'bad' ? 'VENCIDO' : (u === 'warn' ? 'URGENTE' : (u === 'soon' ? 'PROXIMO' : ''));
+    out['Resumen gestionada'] = resumenG();
+    out['Resumen no gestionada'] = resumenN();
     out['Gestionada'] = [['Nave','Pedido','Cliente','Pais dest','Producto','Consolidador','F corte doc','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
       .concat(aggPed(gRows()).map(p => [p.nave, p.ped, p.cli, p.paisd, p.prods.join(' / '), p.cons, p.fcd, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
     out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
       .concat(aggPed(nRows()).map(p => [p.cons, p.paisd, p.ped, p.cli, p.prods.join(' / '), p.nave, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
-    const prio = [['Consolidador','Stk Maximo','Alerta','F corte doc','Nave','Maule t','Valdivia t']];
-    let pCur = null, pMa = 0, pVa = 0, pTm = 0, pTv = 0;
-    const pSub = () => { if (pCur !== null) prio.push(['Total ' + pCur, '', '', '', '', r3(pMa), r3(pVa)]); };
-    prioData().forEach(x => {
-      if (x.cons !== pCur){ pSub(); pCur = x.cons; pMa = 0; pVa = 0; }
-      prio.push([x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
-      pMa += x.ma; pVa += x.va; pTm += x.ma; pTv += x.va;
-    });
-    pSub();
-    if (prio.length > 1) prio.push(['TOTAL GENERAL', '', '', '', '', r3(pTm), r3(pTv)]);
-    out['Prioridades'] = prio;
+    out['Prioridades'] = prioAoa();
   }
-  if (SAP){
-    out['Despachos 078'] = [['Centro','Destino','Maule t','Maule UT','Valdivia t','Valdivia UT','Total t']]
-      .concat(Object.keys(SAP.by).sort().map(c => {
-        const m = (SAP.byPl['Maule'] || {})[c] || 0, v = (SAP.byPl['Valdivia'] || {})[c] || 0;
-        return [c, MAP078[c] || '', r3(m), MAP078[c] ? r3(m / CFG.tDesp) : '', r3(v), MAP078[c] && v ? r3(v / CFG.tDesp) : '', r3(SAP.by[c])];
-      }));
-  }
-  if (TRANS){
-    const rows = [['Planta','Destino','Centro','UT programadas']];
-    ['Maule','Valdivia'].forEach(pl => {
-      const d = TRANS.byPl[pl] || {};
-      Object.keys(d).forEach(k => rows.push([pl, k, d[k].code || '', d[k].ut]));
-    });
-    out['Transporte'] = rows;
-  }
+  if (SAP) out['Despachos 078'] = despAoa();
+  if (TRANS) out['Transporte'] = transAoa();
   if (DET || SAP || TRANS){
     const rows = [['Planta','Destino','Centro','UT programadas','UT despachadas','UT por despachar','Ton por despachar','Remanente t','Q UT proxima oferta']];
     ['Maule','Valdivia'].forEach(pl => {
-      planCalc(pl).rows.forEach(x => rows.push([pl, x.k, x.code || '', r3(x.prog), r3(x.desp), r3(x.por), r3(x.ton), x.rem !== null ? r3(x.rem) : '', x.rem !== null ? r3(x.rem / CFG.tPlan) : '']));
+      progAoa(pl).slice(1).forEach(r => rows.push([pl].concat(r)));
     });
     out['Planificacion'] = rows;
   }
@@ -1387,48 +1475,71 @@ function exportExcel(){
   saveFile('cruce_' + (DET ? DET.corte : dateToISO(new Date())) + '.xlsx', ab);
 }
 function exportPDF(){
-  const secs = buildExport();
-  const names = Object.keys(secs);
-  if (!names.length) return toast('Aún no hay datos cargados');
+  let sections = [], fname = 'cruce', titulo = '';
+  if (MAIN === 'carga'){
+    if (!DET) return toast('Sube el detalle de cartulinas primero');
+    sections = [['Carga gestionada — resumen por nave (status Pendiente)', resumenG()],
+                ['Carga no gestionada — resumen por consolidador y país', resumenN()]];
+    fname = 'carga'; titulo = 'Carga marítima con stock en planta';
+  } else if (MAIN === 'prio'){
+    if (!DET) return toast('Sube el detalle de cartulinas primero');
+    sections = [['Prioridades naves (Stk Máximo = corte doc − 2 días, fin de semana → viernes)', prioAoa()]];
+    fname = 'prioridades'; titulo = 'Prioridades naves para plantas';
+  } else if (MAIN === 'desp'){
+    if (!SAP) return toast('Sube la 078 primero');
+    sections = [['Despachos por centro (UT = t ÷ ' + CFG.tDesp + ')', despAoa()]];
+    fname = 'despachos'; titulo = 'Despachos SAP 078';
+  } else if (MAIN === 'trans'){
+    if (!TRANS) return toast('Sube el programa de transporte primero');
+    sections = [['UT programadas por planta y destino (zona 1, 1 OT = 1 UT)', transAoa()]];
+    fname = 'transporte'; titulo = 'Programa de transporte';
+  } else {
+    if (!DET && !SAP && !TRANS) return toast('Aún no hay datos cargados');
+    sections = [];
+    ['Maule','Valdivia'].forEach(pl => {
+      if (DET) sections.push(['Carga por consolidador — ' + pl, consAoa(pl)]);
+      sections.push(['Programa del día vs despachado — ' + pl, progAoa(pl)]);
+    });
+    fname = 'planificacion'; titulo = 'Planificación por planta';
+  }
   const {jsPDF} = window.jspdf;
   const doc = new jsPDF({orientation: 'landscape', unit: 'mm', format: 'a4'});
   const fecha = DET ? DET.corte : dateToISO(new Date());
   doc.setFontSize(15);
-  doc.text('Cruce Carga Marítima — Maule / Valdivia', 14, 14);
+  doc.text(titulo + ' — Maule / Valdivia', 14, 14);
   doc.setFontSize(9);
   doc.setTextColor(110);
   doc.text('Corte detalle: ' + fecha + (SAP ? ' · 078: ' + SAP.files.join(', ') : '') + (TRANS ? ' · Transporte: ' + TRANS.fecha : ''), 14, 20);
   doc.setTextColor(0);
   let y = 26;
   const fmtCell = v => typeof v === 'number' ? nf.format(v) : String(v == null ? '' : v);
-  names.forEach(n => {
+  sections.forEach(([n, aoa]) => {
     if (y > 160){ doc.addPage(); y = 14; }
     doc.setFontSize(11);
     doc.text(n, 14, y);
-    const opts = {
-      head: [secs[n][0]],
-      body: secs[n].slice(1).map(row => row.map(fmtCell)),
+    const ai = aoa[0].indexOf('Alerta');
+    doc.autoTable({
+      head: [aoa[0]],
+      body: aoa.slice(1).map(row => row.map(fmtCell)),
       startY: y + 2,
-      styles: {fontSize: 6.5, cellPadding: 1.2},
+      styles: {fontSize: 7, cellPadding: 1.3},
       headStyles: {fillColor: [15, 111, 92], textColor: 255},
       theme: 'striped',
-      margin: {left: 14, right: 14}
-    };
-    if (n === 'Prioridades'){
-      const ai = secs[n][0].indexOf('Alerta');
-      opts.didParseCell = d => {
+      margin: {left: 14, right: 14},
+      didParseCell: d => {
         if (d.section !== 'body') return;
-        const fila = secs[n][d.row.index + 1];
-        if (/^(Total |TOTAL)/.test(String(fila[0]))){ d.cell.styles.fillColor = [222, 230, 240]; d.cell.styles.textColor = [30, 40, 55]; d.cell.styles.fontStyle = 'bold'; return; }
-        const al = fila[ai];
-        if (al === 'VENCIDO'){ d.cell.styles.fillColor = [249, 205, 200]; d.cell.styles.textColor = [140, 35, 25]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
-        else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 230, 190]; d.cell.styles.textColor = [130, 80, 10]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
-      };
-    }
-    doc.autoTable(opts);
+        const fila = aoa[d.row.index + 1];
+        if (/^(Total|TOTAL)/.test(String(fila[0]))){ d.cell.styles.fillColor = [222, 230, 240]; d.cell.styles.textColor = [30, 40, 55]; d.cell.styles.fontStyle = 'bold'; return; }
+        if (ai >= 0){
+          const al = fila[ai];
+          if (al === 'VENCIDO'){ d.cell.styles.fillColor = [249, 205, 200]; d.cell.styles.textColor = [140, 35, 25]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+          else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 230, 190]; d.cell.styles.textColor = [130, 80, 10]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+        }
+      }
+    });
     y = doc.lastAutoTable.finalY + 10;
   });
-  saveFile('cruce_' + fecha + '.pdf', new Blob([doc.output('arraybuffer')], {type: 'application/pdf'}));
+  saveFile('cruce_' + fname + '_' + fecha + '.pdf', new Blob([doc.output('arraybuffer')], {type: 'application/pdf'}));
 }
 
 // ================== init ==================
