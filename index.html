@@ -161,6 +161,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
         <option value="p">Solo pendientes</option>
         <option value="r">Solo revisados</option>
       </select>
+      <button class="btn" onclick="expandAll(true)">▾ Abrir todo</button>
+      <button class="btn" onclick="expandAll(false)">▸ Cerrar todo</button>
       <button class="btn" onclick="clearFilters()">Limpiar filtros</button>
       <button class="btn" onclick="clearChecks()">Reiniciar revisados</button>
     </div>
@@ -1044,12 +1046,18 @@ function clearChecks(){
   saveChecks();
   render();
 }
+const OPEN = {G: new Set(), N: new Set()};
 function toggleGrp(key){
   const rowsEls = document.querySelectorAll(`tr[data-g="${CSS.escape(key)}"]`);
   const head = document.querySelector(`tr.grp[data-k="${CSS.escape(key)}"]`);
   if (!head) return;
   const closed = head.classList.toggle('closed');
   rowsEls.forEach(el => el.style.display = closed ? 'none' : '');
+  if (closed) OPEN[TAB].delete(key); else OPEN[TAB].add(key);
+}
+function expandAll(open){
+  OPEN[TAB] = open ? new Set(filteredRows().map(r => TAB === 'G' ? r.nave : r.cons)) : new Set();
+  render();
 }
 function render(){
   if (MAIN !== 'carga' || !DET) return;
@@ -1081,11 +1089,12 @@ function render(){
     const extra = TAB === 'G'
       ? [...new Set(g.map(r => r.cons))].join(' · ') + ' · corte: ' + [...new Set(g.map(r => fdate(r.fcd)))].join(', ')
       : [...new Set(g.map(r => r.paisd))].slice(0,6).join(', ');
-    h += `<tr class="grp" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="${cols - 3}"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${g.length} pos · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
+    const abierto = $('q').value.trim() !== '' || OPEN[TAB].has(k);
+    h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="${cols - 3}"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${g.length} pos · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
     g.sort((a, b) => (TAB === 'G' ? (a.fcd + a.ped).localeCompare(b.fcd + b.ped) : (a.paisd + a.fzp + a.ped).localeCompare(b.paisd + b.fzp + b.ped)));
     g.forEach(r => {
       const id = rid(r), ck = CHECKS[id] ? 'checked' : '';
-      h += `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" title="${esc(r.ges)} · ${esc(r.pto)} · planta ${esc(r.pl)} · status ${esc(r.st)}">`;
+      h += `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" ${abierto ? '' : 'style="display:none"'} title="${esc(r.ges)} · ${esc(r.pto)} · planta ${esc(r.pl)} · status ${esc(r.st)}">`;
       if (TAB === 'G'){
         h += `<td class="mono strike">${esc(r.ped)}-${esc(r.pos)}</td><td><span class="strike">${esc(r.cli)}</span></td><td>${esc(r.paisd)}</td><td class="cli">${esc(r.prod)}</td><td><span class="pill ok">${esc(r.cons)}</span></td><td class="mono">${fdate(r.fcd)}</td><td class="mono">${fdate(r.fzp)}</td>`;
       } else {
