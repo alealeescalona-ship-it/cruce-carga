@@ -1322,8 +1322,17 @@ function buildExport(){
       .concat(aggPed(gRows()).map(p => [p.nave, p.ped, p.cli, p.paisd, p.prods.join(' / '), p.cons, p.fcd, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
     out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
       .concat(aggPed(nRows()).map(p => [p.cons, p.paisd, p.ped, p.cli, p.prods.join(' / '), p.nave, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
-    out['Prioridades'] = [['Consolidador','Stk Maximo','Alerta','F corte doc','Nave','Maule t','Valdivia t']]
-      .concat(prioData().map(x => [x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]));
+    const prio = [['Consolidador','Stk Maximo','Alerta','F corte doc','Nave','Maule t','Valdivia t']];
+    let pCur = null, pMa = 0, pVa = 0, pTm = 0, pTv = 0;
+    const pSub = () => { if (pCur !== null) prio.push(['Total ' + pCur, '', '', '', '', r3(pMa), r3(pVa)]); };
+    prioData().forEach(x => {
+      if (x.cons !== pCur){ pSub(); pCur = x.cons; pMa = 0; pVa = 0; }
+      prio.push([x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
+      pMa += x.ma; pVa += x.va; pTm += x.ma; pTv += x.va;
+    });
+    pSub();
+    if (prio.length > 1) prio.push(['TOTAL GENERAL', '', '', '', '', r3(pTm), r3(pTv)]);
+    out['Prioridades'] = prio;
   }
   if (SAP){
     out['Despachos 078'] = [['Centro','Destino','Maule t','Maule UT','Valdivia t','Valdivia UT','Total t']]
@@ -1409,7 +1418,9 @@ function exportPDF(){
       const ai = secs[n][0].indexOf('Alerta');
       opts.didParseCell = d => {
         if (d.section !== 'body') return;
-        const al = secs[n][d.row.index + 1][ai];
+        const fila = secs[n][d.row.index + 1];
+        if (/^(Total |TOTAL)/.test(String(fila[0]))){ d.cell.styles.fillColor = [222, 230, 240]; d.cell.styles.textColor = [30, 40, 55]; d.cell.styles.fontStyle = 'bold'; return; }
+        const al = fila[ai];
         if (al === 'VENCIDO'){ d.cell.styles.fillColor = [249, 205, 200]; d.cell.styles.textColor = [140, 35, 25]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
         else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 230, 190]; d.cell.styles.textColor = [130, 80, 10]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
       };
