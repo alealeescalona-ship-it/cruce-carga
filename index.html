@@ -1042,7 +1042,7 @@ function toggleCheck(id){
 }
 function clearChecks(){
   if (!confirm('¿Reiniciar todas las marcas de revisado de esta pestaña?')) return;
-  (TAB === 'G' ? gRows() : nRows()).forEach(r => delete CHECKS[rid(r)]);
+  (TAB === 'G' ? gRows() : nRows()).forEach(r => { delete CHECKS[r.ped]; delete CHECKS[rid(r)]; });
   saveChecks();
   render();
 }
@@ -1059,17 +1059,32 @@ function expandAll(open){
   OPEN[TAB] = open ? new Set(filteredRows().map(r => TAB === 'G' ? r.nave : r.cons)) : new Set();
   render();
 }
+function aggPed(rows){
+  const map = {};
+  rows.forEach(r => {
+    const p = map[r.ped] || (map[r.ped] = {ped: r.ped, cli: r.cli, paisd: r.paisd, cons: r.cons, nave: r.nave,
+      fcd: '', fzp: '', ma: 0, va: 0, npos: 0, prods: [], sts: [], ges: r.ges, pto: r.pto, pl: r.pl});
+    p.ma += r.ma; p.va += r.va; p.npos++;
+    if (!p.prods.includes(r.prod)) p.prods.push(r.prod);
+    if (!p.sts.includes(r.st)) p.sts.push(r.st);
+    if (r.fcd && (!p.fcd || r.fcd < p.fcd)) p.fcd = r.fcd;
+    if (r.fzp && (!p.fzp || r.fzp < p.fzp)) p.fzp = r.fzp;
+  });
+  return Object.values(map);
+}
 function render(){
   if (MAIN !== 'carga' || !DET) return;
   const rows = filteredRows();
-  let ma = 0, va = 0, done = 0;
-  rows.forEach(r => { ma += r.ma; va += r.va; if (CHECKS[rid(r)]) done++; });
+  let ma = 0, va = 0;
+  rows.forEach(r => { ma += r.ma; va += r.va; });
+  const pedsAll = [...new Set(rows.map(r => r.ped))];
+  const done = pedsAll.filter(p => CHECKS[p]).length;
   $('summary').innerHTML =
-    `<span>Posiciones: <b>${rows.length}</b></span>` +
+    `<span>Pedidos: <b>${pedsAll.length}</b> <span class="prog">(${rows.length} posiciones)</span></span>` +
     `<span>Maule: <b>${fmt(ma)} t</b></span>` +
     `<span>Valdivia: <b>${fmt(va)} t</b></span>` +
     `<span>Total: <b>${fmt(ma + va)} t</b></span>` +
-    `<span class="prog">Revisadas: <b>${done}/${rows.length}</b></span>`;
+    `<span class="prog">Revisados: <b>${done}/${pedsAll.length}</b></span>`;
   if (!rows.length){ $('tbl').innerHTML = '<div class="empty">Sin resultados con los filtros actuales.</div>'; return; }
   const key = TAB === 'G' ? (r => r.nave) : (r => r.cons);
   const groups = {};
@@ -1085,23 +1100,25 @@ function render(){
   const cols = TAB === 'G' ? 10 : 9;
   gkeys.forEach(k => {
     const g = groups[k];
-    let gm = 0, gv = 0; g.forEach(r => { gm += r.ma; gv += r.va; });
+    const peds = aggPed(g);
+    let gm = 0, gv = 0; peds.forEach(p => { gm += p.ma; gv += p.va; });
     const extra = TAB === 'G'
       ? [...new Set(g.map(r => r.cons))].join(' · ') + ' · corte: ' + [...new Set(g.map(r => fdate(r.fcd)))].join(', ')
       : [...new Set(g.map(r => r.paisd))].slice(0,6).join(', ');
     const abierto = $('q').value.trim() !== '' || OPEN[TAB].has(k);
-    h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="${cols - 3}"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${g.length} pos · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
-    g.sort((a, b) => (TAB === 'G' ? (a.fcd + a.ped).localeCompare(b.fcd + b.ped) : (a.paisd + a.fzp + a.ped).localeCompare(b.paisd + b.fzp + b.ped)));
-    g.forEach(r => {
-      const id = rid(r), ck = CHECKS[id] ? 'checked' : '';
-      h += `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" ${abierto ? '' : 'style="display:none"'} title="${esc(r.ges)} · ${esc(r.pto)} · planta ${esc(r.pl)} · status ${esc(r.st)}">`;
+    h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="${cols - 3}"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${peds.length} ped · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
+    peds.sort((a, b) => (TAB === 'G' ? (a.fcd + a.ped).localeCompare(b.fcd + b.ped) : (a.paisd + a.fzp + a.ped).localeCompare(b.paisd + b.fzp + b.ped)));
+    peds.forEach(p => {
+      const ck = CHECKS[p.ped] ? 'checked' : '';
+      const prodCell = p.prods.length > 1 ? `${p.prods.length} productos` : p.prods[0];
+      h += `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" ${abierto ? '' : 'style="display:none"'} title="${esc(p.prods.join(' · '))} — ${esc(p.ges)} · ${esc(p.pto)} · planta ${esc(p.pl)} · status ${esc(p.sts.join('/'))} · ${p.npos} pos">`;
       if (TAB === 'G'){
-        h += `<td class="mono strike">${esc(r.ped)}-${esc(r.pos)}</td><td><span class="strike">${esc(r.cli)}</span></td><td>${esc(r.paisd)}</td><td class="cli">${esc(r.prod)}</td><td><span class="pill ok">${esc(r.cons)}</span></td><td class="mono">${fdate(r.fcd)}</td><td class="mono">${fdate(r.fzp)}</td>`;
+        h += `<td class="mono strike">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td><span class="pill ok">${esc(p.cons)}</span></td><td class="mono">${fdate(p.fcd)}</td><td class="mono">${fdate(p.fzp)}</td>`;
       } else {
-        h += `<td class="mono strike">${esc(r.ped)}-${esc(r.pos)}</td><td><span class="strike">${esc(r.cli)}</span></td><td>${esc(r.paisd)}</td><td class="cli">${esc(r.prod)}</td><td class="cli">${esc(r.nave).replace('TBN - ','')}</td><td class="mono">${fdate(r.fzp)}</td>`;
+        h += `<td class="mono strike">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td class="cli">${esc(p.nave).replace('TBN - ','')}</td><td class="mono">${fdate(p.fzp)}</td>`;
       }
-      h += `<td class="num">${r.ma > 0 ? fmt(r.ma) : '—'}</td><td class="num">${r.va > 0 ? fmt(r.va) : '—'}</td>` +
-           `<td><input type="checkbox" ${ck} onchange="toggleCheck('${id}')"></td></tr>`;
+      h += `<td class="num">${p.ma > 0 ? fmt(p.ma) : '—'}</td><td class="num">${p.va > 0 ? fmt(p.va) : '—'}</td>` +
+           `<td><input type="checkbox" ${ck} onchange="toggleCheck('${esc(p.ped)}')"></td></tr>`;
     });
   });
   h += '</tbody></table>';
@@ -1300,12 +1317,13 @@ function resetPlan(){
 function buildExport(){
   const out = {};
   if (DET){
-    out['Gestionada'] = [['Nave','Pedido','Pos','Cliente','Pais dest','Producto','Consolidador','F corte doc','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
-      .concat(gRows().map(r => [r.nave, r.ped, r.pos, r.cli, r.paisd, r.prod, r.cons, r.fcd, r.fzp, r.ma, r.va, r.st, CHECKS[rid(r)] ? 'SI' : 'NO']));
-    out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Pos','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
-      .concat(nRows().map(r => [r.cons, r.paisd, r.ped, r.pos, r.cli, r.prod, r.nave, r.fzp, r.ma, r.va, r.st, CHECKS[rid(r)] ? 'SI' : 'NO']));
-    out['Prioridades'] = [['Consolidador','Stk Maximo','F corte doc','Nave','Maule t','Valdivia t']]
-      .concat(prioData().map(x => [x.cons, x.stk, x.fcd, x.nave, x.ma, x.va]));
+    const alertaTxt = u => u === 'bad' ? 'VENCIDO' : (u === 'warn' ? 'URGENTE' : (u === 'soon' ? 'PROXIMO' : ''));
+    out['Gestionada'] = [['Nave','Pedido','Cliente','Pais dest','Producto','Consolidador','F corte doc','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
+      .concat(aggPed(gRows()).map(p => [p.nave, p.ped, p.cli, p.paisd, p.prods.join(' / '), p.cons, p.fcd, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
+    out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
+      .concat(aggPed(nRows()).map(p => [p.cons, p.paisd, p.ped, p.cli, p.prods.join(' / '), p.nave, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
+    out['Prioridades'] = [['Consolidador','Stk Maximo','Alerta','F corte doc','Nave','Maule t','Valdivia t']]
+      .concat(prioData().map(x => [x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]));
   }
   if (SAP){
     out['Despachos 078'] = [['Centro','Destino','Maule t','Maule UT','Valdivia t','Valdivia UT','Total t']]
@@ -1378,7 +1396,7 @@ function exportPDF(){
     if (y > 160){ doc.addPage(); y = 14; }
     doc.setFontSize(11);
     doc.text(n, 14, y);
-    doc.autoTable({
+    const opts = {
       head: [secs[n][0]],
       body: secs[n].slice(1).map(row => row.map(fmtCell)),
       startY: y + 2,
@@ -1386,7 +1404,17 @@ function exportPDF(){
       headStyles: {fillColor: [15, 111, 92], textColor: 255},
       theme: 'striped',
       margin: {left: 14, right: 14}
-    });
+    };
+    if (n === 'Prioridades'){
+      const ai = secs[n][0].indexOf('Alerta');
+      opts.didParseCell = d => {
+        if (d.section !== 'body') return;
+        const al = secs[n][d.row.index + 1][ai];
+        if (al === 'VENCIDO'){ d.cell.styles.fillColor = [249, 205, 200]; d.cell.styles.textColor = [140, 35, 25]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+        else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 230, 190]; d.cell.styles.textColor = [130, 80, 10]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+      };
+    }
+    doc.autoTable(opts);
     y = doc.lastAutoTable.finalY + 10;
   });
   saveFile('cruce_' + fecha + '.pdf', new Blob([doc.output('arraybuffer')], {type: 'application/pdf'}));
