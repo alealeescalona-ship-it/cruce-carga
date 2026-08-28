@@ -205,7 +205,9 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="subtabs" id="stkCentros"></div>
     <div class="secttl">Stock W en <span id="stkCentroNom"></span></div>
     <div class="tblbox"><div id="tblStock"></div></div>
-    <div class="secttl">Semielaborado redirigido (almacén P09)</div>
+    <div class="secttl">Semielaborado redirigido (pedidos SEMI sin embarque)</div>
+    <div class="tblbox"><div id="tblSemi"></div></div>
+    <div class="secttl">Almacén P09</div>
     <div class="tblbox"><div id="tblP09"></div></div>
     <div class="secttl">Detalle por categoría</div>
     <div class="subtabs"><select id="stkCat" onchange="renderStockDet()" class="btn"></select></div>
@@ -1017,7 +1019,8 @@ function stkRowsDet(centro, cat){
   return STK.rows.filter(r => {
     if (r.centro !== centro) return false;
     const es002 = r.alm === '002' || r.alm === '2';
-    if (cat === 'P09') return r.alm === 'P09' || (es002 && esSemi(r));
+    if (cat === 'P09') return r.alm === 'P09';
+    if (cat === 'SEMI') return es002 && esSemi(r);
     if (r.alm === 'P09') return false;
     if (cat === 'OTROS_ALM') return !es002;
     if (!es002) return false;
@@ -1168,7 +1171,8 @@ function setMain(m){
 const STK_CATS = [
   ['BLOQ', 'Bloqueo de Crédito', [['BLOQ_M','Marítimo'], ['BLOQ_I','Internacional']], true],
   ['CHDIR', 'Chile Directo', 'clientes', true],
-  ['P09', 'Semielaborado Redirigidos', null, true],
+  ['SEMI', 'Semielaborado Redirigidos', null, true],
+  ['P09A', 'Almacén P09', null, false],
   ['NOG', 'No Gestionado', [['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional']], true],
   ['CHBOD', 'Chile Bodega Nacional', null, false],
   ['GEST_M', 'Gestionado Marítimo', null, false],
@@ -1179,16 +1183,12 @@ function stkResumen(centro){
   const filas = [];  // {tipo:'cat'|'sub', lbl, t, pTot?, rojo?, cat}
   const tot = S.total || 1;
   const pct = v => Math.round(v / tot * 100) + '%';
-  const catT = {BLOQ: S.bloqM + S.bloqI, CHDIR: Object.values(S.chdir).reduce((a, b) => a + b, 0), P09: S.p09 + S.semi002,
+  const catT = {BLOQ: S.bloqM + S.bloqI, CHDIR: Object.values(S.chdir).reduce((a, b) => a + b, 0), SEMI: S.semi002, P09A: S.p09,
     NOG: S.porgM + S.porgI + S.sineM + S.sineI, CHBOD: S.chbod, GEST_M: S.gestM, GEST_I: S.gestI};
   STK_CATS.forEach(([id, lbl, subs, rojo]) => {
     const t = catT[id];
     if (t <= 0.0005 && id !== 'NOG') return;
-    filas.push({tipo: 'cat', lbl, t, pTot: pct(t), rojo, cat: id === 'BLOQ' ? 'BLOQ_M' : (id === 'NOG' ? 'PORG_M' : id)});
-    if (id === 'P09' && S.p09 > 0.0005 && S.semi002 > 0.0005){
-      filas.push({tipo: 'sub', lbl: 'Almacén P09', t: S.p09, pPar: pct(S.p09), cat: 'P09'});
-      filas.push({tipo: 'sub', lbl: 'Pedido SEMI sin embarque', t: S.semi002, pPar: pct(S.semi002), cat: 'P09'});
-    }
+    filas.push({tipo: 'cat', lbl, t, pTot: pct(t), rojo, cat: id === 'BLOQ' ? 'BLOQ_M' : (id === 'NOG' ? 'PORG_M' : (id === 'P09A' ? 'P09' : id))});
     if (subs === 'clientes'){
       Object.keys(S.chdir).sort().forEach(c => filas.push({tipo: 'sub', lbl: c, t: S.chdir[c], pPar: pct(S.chdir[c]), cat: 'CHDIR'}));
     } else if (Array.isArray(subs)){
@@ -1206,7 +1206,7 @@ function renderStock(){
     $('stockNote').textContent = '';
     $('stkCentros').innerHTML = '';
     $('tblStock').innerHTML = '<div class="empty">Sube el archivo 073 (stock en planta y consolidadores) para ver este análisis.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
-    $('tblP09').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
+    $('tblP09').innerHTML = ''; $('tblSemi').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
     $('stkCentroNom').textContent = '';
     return;
   }
@@ -1230,24 +1230,25 @@ function renderStock(){
   });
   h += '</tbody></table>';
   $('tblStock').innerHTML = h;
-  // P09
-  const p09 = stkRowsDet(STKC, 'P09');
-  if (p09.length){
+  // Tablas aparte: SEMI y P09
+  const tablaAparte = (cat, targetId, totalLbl, vacio) => {
+    const rws = stkRowsDet(STKC, cat);
+    if (!rws.length){ $(targetId).innerHTML = `<div class="empty">${vacio}</div>`; return; }
     let h2 = '<table><thead><tr><th>Centro</th><th>País</th><th>Destinatario</th><th>Pedido</th><th class="num">Libre utiliz. t</th></tr></thead><tbody>';
     let t = 0;
     const agg = {};
-    p09.forEach(r => { const k = r.pais + '||' + (r.dest || r.cli) + '||' + r.ped; const o = agg[k] || (agg[k] = {pais: r.pais, dest: r.dest || r.cli, ped: r.ped, libre: 0}); o.libre += r.libre; });
+    rws.forEach(r => { const k = r.pais + '||' + (r.dest || r.cli) + '||' + r.ped; const o = agg[k] || (agg[k] = {pais: r.pais, dest: r.dest || r.cli, ped: r.ped, libre: 0}); o.libre += r.libre; });
     Object.values(agg).sort((a, b) => b.libre - a.libre).forEach(o => {
       t += o.libre;
       h2 += `<tr class="det"><td>${esc(STK.centros[STKC])}</td><td>${esc(o.pais)}</td><td>${esc(o.dest)}</td><td class="mono">${esc(o.ped) || '<span class="cli">sin pedido</span>'}</td><td class="num">${fmt(o.libre)}</td></tr>`;
     });
-    h2 += `<tr class="tot"><td colspan="4">Total P09</td><td class="num">${fmt(t)}</td></tr></tbody></table>`;
-    $('tblP09').innerHTML = h2;
-  } else {
-    $('tblP09').innerHTML = '<div class="empty">Sin stock P09 en este centro.</div>';
-  }
+    h2 += `<tr class="tot"><td colspan="4">${totalLbl}</td><td class="num">${fmt(t)}</td></tr></tbody></table>`;
+    $(targetId).innerHTML = h2;
+  };
+  tablaAparte('SEMI', 'tblSemi', 'Total semielaborado redirigido', 'Sin pedidos SEMI sin embarque en este centro.');
+  tablaAparte('P09', 'tblP09', 'Total almacén P09', 'Sin stock P09 en este centro.');
   // selector de categoría para detalle
-  const cats = [['GEST_M','Gestionado Marítimo'], ['GEST_I','Gestionado Terrestre Internacional'], ['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional'], ['BLOQ_M','Bloqueado Marítimo'], ['BLOQ_I','Bloqueado Internacional'], ['CHDIR','Chile Directo'], ['CHBOD','Chile Bodega Nacional'], ['P09','Semielaborado P09']];
+  const cats = [['GEST_M','Gestionado Marítimo'], ['GEST_I','Gestionado Terrestre Internacional'], ['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional'], ['BLOQ_M','Bloqueado Marítimo'], ['BLOQ_I','Bloqueado Internacional'], ['CHDIR','Chile Directo'], ['CHBOD','Chile Bodega Nacional'], ['SEMI','Semielaborado (SEMI sin embarque)'], ['P09','Almacén P09']];
   const cur = $('stkCat').value;
   $('stkCat').innerHTML = cats.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
   if (cats.some(([v]) => v === cur)) $('stkCat').value = cur;
@@ -1775,13 +1776,19 @@ function buildExport(){
       stkResumen(c).forEach(f => res.push([STK.centros[c], (f.tipo === 'sub' ? '    ' : '') + f.lbl, Math.round(f.t), f.pPar || '', f.pTot || '']));
     });
     out['Stock 073'] = res;
-    const p09 = [['Centro','Pais','Destinatario','Pedido','Libre t']];
-    Object.keys(STK.centros).forEach(c => {
-      let t = 0;
-      stkRowsDet(c, 'P09').forEach(r => { p09.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; });
-      if (t) p09.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
-    });
-    out['Stock P09'] = p09;
+    const mkAparte = cat => {
+      const aoa = [['Centro','Pais','Destinatario','Pedido','Libre t']];
+      Object.keys(STK.centros).forEach(c => {
+        let t = 0;
+        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; });
+        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
+      });
+      return aoa;
+    };
+    const semiAoa = mkAparte('SEMI');
+    if (semiAoa.length > 1) out['Semielaborado SEMI'] = semiAoa;
+    const p09Aoa = mkAparte('P09');
+    if (p09Aoa.length > 1) out['Stock P09'] = p09Aoa;
   }
   if (DET || SAP || TRANS){
     const rows = [['Planta','Destino','Centro','UT programadas','UT despachadas','UT por despachar','Ton por despachar','Remanente t','Q UT proxima oferta']];
@@ -1889,14 +1896,19 @@ function exportPDF(){
       stkResumen(c).forEach(f => aoa.push([(f.tipo === 'sub' ? '    ' : '') + f.lbl, Math.round(f.t), f.pPar || '', f.pTot || '']));
       return ['Stock W en ' + STK.centros[c] + ' (' + c + ')', aoa];
     });
-    const p09aoa = [['Centro','País','Destinatario','Pedido','Libre t']];
-    let hayP09 = false;
-    Object.keys(STK.centros).forEach(c => {
-      let t = 0;
-      stkRowsDet(c, 'P09').forEach(r => { p09aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; hayP09 = true; });
-      if (t) p09aoa.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
-    });
-    if (hayP09) sections.push(['Semielaborado redirigido (almacén P09)', p09aoa]);
+    const mkAp = cat => {
+      const aoa = [['Centro','País','Destinatario','Pedido','Libre t']];
+      Object.keys(STK.centros).forEach(c => {
+        let t = 0;
+        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; });
+        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
+      });
+      return aoa;
+    };
+    const semiA = mkAp('SEMI');
+    if (semiA.length > 1) sections.push(['Semielaborado redirigido (pedidos SEMI sin embarque)', semiA]);
+    const p09A = mkAp('P09');
+    if (p09A.length > 1) sections.push(['Almacén P09', p09A]);
     fname = 'stock073'; titulo = 'Stock en planta y consolidadores (073)';
   } else {
     if (!DET && !SAP && !TRANS) return toast('Aún no hay datos cargados');
