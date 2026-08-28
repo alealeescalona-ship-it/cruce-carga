@@ -861,7 +861,8 @@ function ingestDetalle(aoa, fname){
     });
   }
   const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
-  const alert = Object.values(alertMap).filter(o => Object.keys(o.s).length >= 2);
+  // Alerta solo para pedidos CON embarque real (nave asignada) y stock en 2+ consolidadores
+  const alert = Object.values(alertMap).filter(o => Object.keys(o.s).length >= 2 && o.et === 'NO');
   alert.sort((a, b) => (a.cons + a.ped).localeCompare(b.cons + b.ped));
   DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert};
 }
@@ -1343,7 +1344,7 @@ function renderAlert(){
   const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
   let tt = 0;
   list.forEach(o => Object.values(o.s).forEach(v => tt += v));
-  $('summary').innerHTML = `<span>Pedidos con stock en 2+ consolidadores: <b>${list.length}</b></span><span>Toneladas involucradas: <b>${fmt(tt)} t</b></span><span class="prog">Consolidadores: Coronel · DYC SAI · Bodega Nacional · PC Valp (Maule y Valdivia son plantas, no cuentan)</span>` +
+  $('summary').innerHTML = `<span>Embarques con stock en 2+ consolidadores: <b>${list.length}</b></span><span>Toneladas involucradas: <b>${fmt(tt)} t</b></span><span class="prog">Solo pedidos con nave asignada · consolidadores: Coronel · DYC SAI · Bodega Nacional · PC Valp (las plantas no cuentan)</span>` +
     (!DET || !DET.alert ? '<span class="prog">— vuelve a subir el detalle para calcular esta alerta</span>' : '');
   if (!list.length){ $('tbl').innerHTML = '<div class="empty">Sin alertas: ningún pedido marítimo tiene stock repartido entre consolidadores distintos.</div>'; return; }
   let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País dest.</th><th>Programado a</th><th>Nave / servicio</th><th>Zarpe plan</th>';
