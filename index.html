@@ -826,10 +826,11 @@ function ingestDetalle(aoa, fname){
     ma: col('maule'), va: col('valdivia'), cons: col('consolidador'), nave: col('nave'),
     fcd: col('fecha corte documental'), fzp: col('fecha zarpe plan'), femb: col('fecha embarque'),
     sem: col('semana embarque'), bk: col('booking'), ges: col('gestion'),
-    cSai: col('dyc sai'), cPcv: col('pto columbo vap'), cThno: col('dyc thno'),
-    cCor: col('coronel'), cOtr: col('otros consolidadores')
+    cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
+    cCor: col('coronel'), cBod: col('stock bod nacionales')
   };
-  const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PTO COLUMBO VAP'], ['cThno','DYC THNO'], ['cCor','CORONEL'], ['cOtr','OTROS']];
+  // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
+  const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const alertMap = {};
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
@@ -1336,19 +1337,21 @@ function setTab(t){
   refreshSelects();
   render();
 }
+const CONS_MATCH = {'DYC SAI': ['sai'], 'PC VALP': ['columbo','valpara'], 'CORONEL': ['coronel'], 'BOD. NACIONAL': ['bodega','nacional']};
 function renderAlert(){
   const list = (DET && DET.alert) || [];
-  const CONS_LBL = ['DYC SAI','PTO COLUMBO VAP','DYC THNO','CORONEL','OTROS'];
+  const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
   let tt = 0;
   list.forEach(o => Object.values(o.s).forEach(v => tt += v));
-  $('summary').innerHTML = `<span>Pedidos con stock en 2+ consolidadores: <b>${list.length}</b></span><span>Toneladas involucradas: <b>${fmt(tt)} t</b></span>` +
+  $('summary').innerHTML = `<span>Pedidos con stock en 2+ consolidadores: <b>${list.length}</b></span><span>Toneladas involucradas: <b>${fmt(tt)} t</b></span><span class="prog">Consolidadores: Coronel · DYC SAI · Bodega Nacional · PC Valp (Maule y Valdivia son plantas, no cuentan)</span>` +
     (!DET || !DET.alert ? '<span class="prog">— vuelve a subir el detalle para calcular esta alerta</span>' : '');
   if (!list.length){ $('tbl').innerHTML = '<div class="empty">Sin alertas: ningún pedido marítimo tiene stock repartido entre consolidadores distintos.</div>'; return; }
   let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País dest.</th><th>Programado a</th><th>Nave / servicio</th><th>Zarpe plan</th>';
   CONS_LBL.forEach(c => h += `<th class="num">${esc(c)} t</th>`);
   h += '</tr></thead><tbody>';
   list.forEach(o => {
-    const mal = Object.keys(o.s).filter(c => !norm(o.cons).includes(norm(c).split(' ')[0]));
+    const nc = norm(o.cons);
+    const mal = Object.keys(o.s).filter(c => !(CONS_MATCH[c] || []).some(t => nc.includes(t)));
     h += `<tr class="det"><td class="mono">${esc(o.ped)}</td><td>${esc(o.cli)}</td><td>${esc(o.paisd)}</td>` +
       `<td><span class="pill ${o.et === 'SI' ? 'warn' : 'ok'}">${esc(o.cons || '—')}</span></td>` +
       `<td class="cli">${esc(o.nave).replace('TBN - ','')}</td><td class="mono">${fdate(o.fzp)}</td>`;
@@ -1759,7 +1762,7 @@ function buildExport(){
     out['Prioridades'] = prioAoa();
   }
   if (DET && DET.alert && DET.alert.length){
-    const CONS_LBL = ['DYC SAI','PTO COLUMBO VAP','DYC THNO','CORONEL','OTROS'];
+    const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
     out['Alerta consolidadores'] = [['Pedido','Cliente','Pais dest','Programado a','Nave','F zarpe plan'].concat(CONS_LBL.map(c => c + ' t'))]
       .concat(DET.alert.map(o => [o.ped, o.cli, o.paisd, o.cons, o.nave, o.fzp].concat(CONS_LBL.map(c => o.s[c] ? r3(o.s[c]) : ''))));
   }
