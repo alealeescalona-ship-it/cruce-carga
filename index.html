@@ -869,7 +869,8 @@ function ingestDetalle(aoa, fname){
     sem: col('semana embarque'), bk: col('booking'), ges: col('gestion'),
     cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
     cCor: col('coronel'), cBod: col('stock bod nacionales'),
-    ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready')
+    ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready'),
+    ent2: col('entrega'), ntr: col('n transporte')
   };
   // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
   const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
@@ -883,22 +884,30 @@ function ingestDetalle(aoa, fname){
     const ma = numv(a[C.ma]), va = numv(a[C.va]);
     // Falta de produccion: gestionados (embarque real) donde lo producido no alcanza la cantidad de entrega
     if (String(a[C.et] || '').trim() !== 'SI'){
+      const entV = String(a[C.ent2] == null ? '' : a[C.ent2]).trim();
+      const ntrV = String(a[C.ntr] == null ? '' : a[C.ntr]).trim();
+      const addRef = o => {
+        if (entV && !o.ents.includes(entV)) o.ents.push(entV);
+        if (ntrV && !o.trs.includes(ntrV)) o.trs.push(ntrV);
+      };
       const geV = numv(a[C.ge]), pyV = numv(a[C.py]);
       if (geV > 0){
         const pedF = String(a[C.ped] || '');
         const f = faltaMap[pedF] || (faltaMap[pedF] = {ped: pedF, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
-          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: dstr(a[C.fcd]), ge: 0, py: 0});
+          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: dstr(a[C.fcd]), ge: 0, py: 0, ents: [], trs: []});
         f.ge += geV; f.py += pyV;
+        addRef(f);
       }
       // Fin ready posterior al corte documental (fechas de la pestaña Datos)
       const frV = dstr(a[C.fr]), fcdV = dstr(a[C.fcd]);
       if (frV && fcdV){
         const pedR = String(a[C.ped] || '');
         const rr2 = readyMap[pedR] || (readyMap[pedR] = {ped: pedR, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
-          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: fcdV, fr: frV, ma: 0, va: 0});
+          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: fcdV, fr: frV, ma: 0, va: 0, ents: [], trs: []});
         if (fcdV < rr2.fcd) rr2.fcd = fcdV;
         if (frV > rr2.fr) rr2.fr = frV;
         rr2.ma += numv(a[C.ma]); rr2.va += numv(a[C.va]);
+        addRef(rr2);
       }
     }
     // Alerta: stock repartido entre consolidadores (independiente del stock en planta)
@@ -1305,23 +1314,24 @@ function renderResumen(){
     } else $('resNaves').innerHTML = '<div class="empty">Sin naves urgentes ✅</div>';
     // Fin ready posterior al corte documental
     const rdy = DET.ready || [];
+    const refCell = o => `<td class="mono">${o.ents && o.ents.length ? esc(o.ents.join(', ')) : '—'}</td><td class="mono">${o.trs && o.trs.length ? esc(o.trs.join(', ')) : '—'}</td>`;
     if (rdy.length){
-      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th>Fin ready</th><th class="num">Días atraso</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Entrega</th><th>Transporte</th><th>Corte doc.</th><th>Fin ready</th><th class="num">Días atraso</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
       rdy.forEach(o => {
-        h += `<tr class="det"><td class="mono">${esc(o.ped)}</td><td>${esc(o.cli)}</td><td><b>${esc(o.nave)}</b></td><td class="cli">${esc(o.cons)}</td><td class="mono">${fdate(o.fcd)}</td><td><span class="pill bad mono">${fdate(o.fr)}</span></td><td class="num"><span class="neg"><b>+${o.dias}</b></span></td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td></tr>`;
+        h += `<tr class="det"><td class="mono">${esc(o.ped)}</td><td>${esc(o.cli)}</td><td><b>${esc(o.nave)}</b></td><td class="cli">${esc(o.cons)}</td>${refCell(o)}<td class="mono">${fdate(o.fcd)}</td><td><span class="pill bad mono">${fdate(o.fr)}</span></td><td class="num"><span class="neg"><b>+${o.dias}</b></span></td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td></tr>`;
       });
-      h += `<tr class="tot"><td colspan="9">${rdy.length} embarques con fin ready posterior al corte</td></tr></tbody></table>`;
+      h += `<tr class="tot"><td colspan="11">${rdy.length} embarques con fin ready posterior al corte</td></tr></tbody></table>`;
       $('resReady').innerHTML = h;
     } else $('resReady').innerHTML = '<div class="empty">' + (DET.ready ? 'Sin embarques con fin ready posterior al corte ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
-    const fal = (DET.falta || []).slice(0, 40);
+    const fal = (DET.falta || []).slice(0, 60);
     if (fal.length){
-      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
+      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Entrega</th><th>Transporte</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
       let tf = 0;
       fal.forEach(f => {
         tf += f.falta;
-        h += `<tr class="det"><td class="mono">${esc(f.ped)}</td><td>${esc(f.cli)}</td><td>${esc(f.nave)}</td><td class="cli">${esc(f.cons)}</td><td class="mono">${fdate(f.fcd)}</td><td class="num">${fmt(f.ge)}</td><td class="num">${fmt(f.py)}</td><td class="num"><span class="neg"><b>${fmt(f.falta)}</b></span></td></tr>`;
+        h += `<tr class="det"><td class="mono">${esc(f.ped)}</td><td>${esc(f.cli)}</td><td>${esc(f.nave)}</td><td class="cli">${esc(f.cons)}</td>${refCell(f)}<td class="mono"><b>${fdate(f.fcd)}</b></td><td class="num">${fmt(f.ge)}</td><td class="num">${fmt(f.py)}</td><td class="num"><span class="neg"><b>${fmt(f.falta)}</b></span></td></tr>`;
       });
-      h += `<tr class="tot"><td colspan="7">Total falta de producción (${fal.length} pedidos)</td><td class="num">${fmt(tf)}</td></tr></tbody></table>`;
+      h += `<tr class="tot"><td colspan="9">Total falta de producción (${fal.length} pedidos)</td><td class="num">${fmt(tf)}</td></tr></tbody></table>`;
       $('resFalta').innerHTML = h;
     } else $('resFalta').innerHTML = '<div class="empty">' + (DET.falta ? 'Sin faltas de producción ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
   } else {
@@ -2224,8 +2234,8 @@ function resumenStockAoa(){
   return aoa;
 }
 function faltaAoa(){
-  return [['Pedido','Cliente','Nave','Consolidador','F corte doc','Entrega t','Producido t','Falta t']]
-    .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
+  return [['Pedido','Cliente','Nave','Consolidador','Entrega','Transporte','F corte doc','Entrega t','Producido t','Falta t']]
+    .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, (f.ents || []).join(', '), (f.trs || []).join(', '), f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
 }
 function urgAoa(){
   return [['Nave','Consolidador','F corte doc','Alerta','Stk Maximo','Maule t','Valdivia t']]
@@ -2233,8 +2243,8 @@ function urgAoa(){
       .map(x => [x.nave, x.cons, x.fcd, alertaTxt(urgency(x.fcd)), x.stk, r3(x.ma), r3(x.va)]));
 }
 function readyAoa(){
-  return [['Pedido','Cliente','Nave','Consolidador','F corte doc','F fin ready','Dias atraso','Maule t','Valdivia t']]
-    .concat((DET.ready || []).map(o => [o.ped, o.cli, o.nave, o.cons, o.fcd, o.fr, o.dias, o.ma, o.va]));
+  return [['Pedido','Cliente','Nave','Consolidador','Entrega','Transporte','F corte doc','F fin ready','Dias atraso','Maule t','Valdivia t']]
+    .concat((DET.ready || []).map(o => [o.ped, o.cli, o.nave, o.cons, (o.ents || []).join(', '), (o.trs || []).join(', '), o.fcd, o.fr, o.dias, o.ma, o.va]));
 }
 function exportPDF(){
   let sections = [], fname = 'cruce', titulo = '';
