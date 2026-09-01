@@ -149,7 +149,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="kpis" id="resKpis"></div>
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
-    <div class="secttl">🚢 Naves urgentes (corte documental vencido o dentro de los próximos 3 días)</div>
+    <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
     <p class="note">Embarques <b>pendientes</b> (sin contabilizar) donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
@@ -203,7 +203,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
 
   <!-- ============ TAB PRIORIDADES ============ -->
   <section id="sec_prio" style="display:none">
-    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = corte documental entre hoy y 3 días más; <b>VENCIDA ⛔</b> = corte ya pasado.</p>
+    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = Stk Máximo entre hoy y 3 días más; <b>VENCIDA ⛔</b> = Stk Máximo ya pasado.</p>
     <div class="filters">
       <select id="fPCons" onchange="renderPrio()"></select>
       <select id="fPNave" onchange="renderPrio()"></select>
@@ -1155,7 +1155,7 @@ function stkMax(fcdISO){
   else if (d.getDay() === 0) d.setDate(d.getDate() - 2);
   return dateToISO(d);
 }
-// Urgencia por FECHA CORTE DOCUMENTAL: vencida (<hoy), urgente (hoy a hoy+3), proxima (hoy+4/5)
+// Urgencia por fecha STK MAXIMO: vencida (<hoy), urgente (hoy a hoy+3), proxima (hoy+4/5)
 function urgency(iso){
   if (!iso) return '';
   const today = new Date(); today.setHours(0,0,0,0);
@@ -1301,13 +1301,13 @@ function renderResumen(){
   }
   // Naves urgentes (por fecha corte documental)
   if (DET){
-    const urg = prioData().filter(x => ['bad','warn'].includes(urgency(x.fcd)));
-    urg.sort((a, b) => a.fcd.localeCompare(b.fcd));
+    const urg = prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)));
+    urg.sort((a, b) => a.stk.localeCompare(b.stk));
     if (urg.length){
-      let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th>Stk Máximo</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+      let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Stk Máximo</th><th>Corte doc.</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
       urg.forEach(x => {
-        const u = urgency(x.fcd);
-        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono"><b>${fdate(x.fcd)}</b>${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.stk)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+        const u = urgency(x.stk);
+        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono"><b>${fdate(x.stk)}</b>${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.fcd)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
       });
       h += '</tbody></table>';
       $('resNaves').innerHTML = h;
@@ -1445,12 +1445,24 @@ function copyCorreo(){
   const nfe = n => nf0.format(Math.round(n));
   const td = 'border:1px solid #000;padding:3px 10px;';
   const th = td + 'background:#c9c9c9;font-weight:bold;text-align:center;';
+  const stockPl = p => PLANTA === 'Valdivia' ? p.va : p.ma;
   const sel = aggPed(nRows()).filter(p => CHECKS[p.ped]);
   let selT = 0;
-  sel.forEach(p => { selT += (PLANTA === 'Valdivia' ? p.va : p.ma); });
+  const porGSel = {};
+  sel.forEach(p => { selT += stockPl(p); porGSel[p.cons] = (porGSel[p.cons] || 0) + stockPl(p); });
+  const usarSel = sel.length > 0;   // con checks: "Por Gestionar" = solo lo autorizado (marcado), por consolidador
   let tp = 0, tg = 0;
   let t1 = `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Status</td><td style="${th}">Consolidador</td><td style="${th}">Peso (Tons)</td></tr>`;
-  P.forEach(([lbl, key]) => { const t = porG[key] || 0; tp += t; t1 += `<tr><td style="${td}text-align:center">Por Gestionar</td><td style="${td}text-align:center">${lbl}</td><td style="${td}text-align:center">${nfe(t)}</td></tr>`; });
+  const usados = [];
+  P.forEach(([lbl, key]) => {
+    const t = usarSel ? (porGSel[key] || 0) : (porG[key] || 0);
+    usados.push(key); tp += t;
+    t1 += `<tr><td style="${td}text-align:center">Por Gestionar</td><td style="${td}text-align:center">${lbl}</td><td style="${td}text-align:center">${nfe(t)}</td></tr>`;
+  });
+  if (usarSel) Object.keys(porGSel).filter(k => !usados.includes(k)).forEach(k => {
+    tp += porGSel[k];
+    t1 += `<tr><td style="${td}text-align:center">Por Gestionar</td><td style="${td}text-align:center">${esc(k)}</td><td style="${td}text-align:center">${nfe(porGSel[k])}</td></tr>`;
+  });
   t1 += `<tr><td style="${td}font-weight:bold">Total Por Gestionar</td><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(tp)}</td></tr>`;
   G.forEach(([lbl, key]) => { const t = gest[key] || 0; tg += t; t1 += `<tr><td style="${td}text-align:center">Gestionado</td><td style="${td}text-align:center">${lbl}</td><td style="${td}text-align:center">${nfe(t)}</td></tr>`; });
   t1 += `<tr><td style="${td}font-weight:bold">Total Gestionado</td><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(tg)}</td></tr>`;
@@ -1796,7 +1808,7 @@ function prioView(){
   const fc = $('fPCons').value, fn = $('fPNave').value, fu = $('fPUrg').value;
   if (fc) list = list.filter(x => x.cons === fc);
   if (fn) list = list.filter(x => x.nave === fn);
-  if (fu === 'u') list = list.filter(x => ['bad','warn'].includes(urgency(x.fcd)));
+  if (fu === 'u') list = list.filter(x => ['bad','warn'].includes(urgency(x.stk)));
   const ord = $('fPOrden').value || 'cons';
   if (ord === 'fcd') list.sort((a, b) => (a.fcd + a.nave).localeCompare(b.fcd + b.nave));
   else if (ord === 'nave') list.sort((a, b) => (a.nave + a.fcd).localeCompare(b.nave + b.fcd));
@@ -1816,10 +1828,10 @@ function renderPrio(){
   const subtotal = () => { if (conSub && cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
   list.forEach(x => {
     if (conSub && x.cons !== cur){ subtotal(); cur = x.cons; sm = 0; sv = 0; }
-    const u = urgency(x.fcd);
+    const u = urgency(x.stk);
     const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
     const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-    h += `<tr class="det"><td>${esc(x.cons)}</td><td><span class="${pill} mono"><b>${fdate(x.fcd)}</b>${mark}</span></td><td class="mono">${fdate(x.stk)}</td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+    h += `<tr class="det"><td>${esc(x.cons)}</td><td class="mono">${fdate(x.fcd)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
     sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
   });
   subtotal();
@@ -1833,10 +1845,10 @@ function copyPrio(){
   const lines = ['PRIORIDADES NAVES — corte detalle ' + (DET ? fdate(DET.corte) : '')];
   list.forEach(x => {
     if (x.cons !== cur){ cur = x.cons; lines.push('', cur + ':'); }
-    const u = urgency(x.fcd);
+    const u = urgency(x.stk);
     const mark = u === 'bad' ? ' [VENCIDA]' : (u === 'warn' ? ' [URGENTE]' : '');
     const tons = (x.ma > 0 ? fmt(x.ma) + ' t Maule' : '') + (x.ma > 0 && x.va > 0 ? ' + ' : '') + (x.va > 0 ? fmt(x.va) + ' t Valdivia' : '');
-    lines.push(`  ${x.nave} — corte doc ${fdate(x.fcd)} (stk máximo ${fdate(x.stk)}) — ${tons}${mark}`);
+    lines.push(`  ${x.nave} — stk máximo ${fdate(x.stk)} (corte doc ${fdate(x.fcd)}) — ${tons}${mark}`);
   });
   const txt = lines.join('\n');
   const done = () => toast('Prioridades copiadas al portapapeles');
@@ -1990,7 +2002,7 @@ function prioAoa(){
   const pSub = () => { if (pCur !== null) prio.push(['Total ' + pCur, '', '', '', '', r3(pMa), r3(pVa)]); };
   prioData().forEach(x => {
     if (x.cons !== pCur){ pSub(); pCur = x.cons; pMa = 0; pVa = 0; }
-    prio.push([x.cons, x.stk, alertaTxt(urgency(x.fcd)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
+    prio.push([x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
     pMa += x.ma; pVa += x.va; pTm += x.ma; pTv += x.va;
   });
   pSub();
@@ -2238,9 +2250,9 @@ function faltaAoa(){
     .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, (f.ents || []).join(', '), (f.trs || []).join(', '), f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
 }
 function urgAoa(){
-  return [['Nave','Consolidador','F corte doc','Alerta','Stk Maximo','Maule t','Valdivia t']]
-    .concat(prioData().filter(x => ['bad','warn'].includes(urgency(x.fcd)))
-      .map(x => [x.nave, x.cons, x.fcd, alertaTxt(urgency(x.fcd)), x.stk, r3(x.ma), r3(x.va)]));
+  return [['Nave','Consolidador','Stk Maximo','Alerta','F corte doc','Maule t','Valdivia t']]
+    .concat(prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)))
+      .map(x => [x.nave, x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, r3(x.ma), r3(x.va)]));
 }
 function readyAoa(){
   return [['Pedido','Cliente','Nave','Consolidador','Entrega','Transporte','F corte doc','F fin ready','Dias atraso','Maule t','Valdivia t']]
