@@ -95,7 +95,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 .empty{padding:28px;text-align:center;color:var(--muted)}
 footer{margin:14px 0 6px;color:var(--muted);font-size:12px;text-align:center}
 .note{color:var(--muted);font-size:12.5px;margin:0 0 10px}
-.secttl{font-size:15px;font-weight:700;margin:16px 0 8px}
+.secttl{font-size:15px;font-weight:700;margin:16px 0 8px;cursor:pointer;user-select:none}
+.secttl::before{content:'▾ ';color:var(--muted);font-size:12px}
+.secttl.closed::before{content:'▸ '}
+.secttl:hover{color:var(--accent)}
 td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-line);border-radius:6px;padding:5px 7px;font:13px "IBM Plex Mono",Consolas,monospace;color:var(--ink);text-align:right}
 .autohint{font-size:11px;color:var(--muted);display:block;margin-top:2px}
 .cfg{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px}
@@ -874,7 +877,7 @@ function ingestDetalle(aoa, fname){
     ma: col('maule'), va: col('valdivia'), cons: col('consolidador'), nave: col('nave'),
     fcd: col('fecha corte documental'), fzp: col('fecha zarpe plan'), femb: col('fecha embarque'),
     sem: col('semana embarque'), bk: col('booking'), ges: col('gestion'),
-    cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
+    cSai: col('dyc sai'), cPcv: col('pto columbo vap'), cThno: col('dyc thno'),
     cCor: col('coronel'), cBod: col('stock bod nacionales'),
     ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready'),
     ent2: col('entrega'), ntr: col('n transporte'), fzr: col('fecha zarpe real')
@@ -885,7 +888,7 @@ function ingestDetalle(aoa, fname){
   const faltaMap = {};
   const readyMap = {};
   const saldoRows = [];
-  const UBIC_COLS = [['ma','MAULE (planta)'], ['va','VALDIVIA (planta)'], ['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
+  const UBIC_COLS = [['cCor','CORONEL'], ['va','VALDIVIA'], ['ma','MAULE'], ['cSai','DYC SAI'], ['cThno','DYC THNO'], ['cPcv','PC VALP'], ['cBod','BOD. NAC.']];
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r];
@@ -964,25 +967,34 @@ function ingestDetalle(aoa, fname){
   const ready = Object.values(readyMap).filter(o => o.fr > o.fcd)
     .map(o => Object.assign(o, {ma: r3(o.ma), va: r3(o.va), dias: Math.round((isoToDate(o.fr) - isoToDate(o.fcd)) / 86400000)}));
   ready.sort((a, b) => a.fcd.localeCompare(b.fcd));
-  // Agregar saldos por semana (martes a lunes) x consolidador x nave x ubicacion
+  // Agregar saldos por semana (martes a lunes, numero -1) x nave, con ubicaciones como columnas
   const salMap = {};
   saldoRows.forEach(s => {
     const w = semanaMartes(s.fzr);
-    const k = w.key + '||' + s.cons + '||' + s.nave + '||' + s.ub;
-    const o = salMap[k] || (salMap[k] = {sem: w.key, semLbl: w.lbl, cons: s.cons, nave: s.nave, ub: s.ub, t: 0, peds: []});
-    o.t += s.t;
+    const k = w.key + '||' + s.nave;
+    const o = salMap[k] || (salMap[k] = {sem: w.key, num: w.num, semLbl: w.lbl, nave: s.nave, cons: s.cons, u: {}, tot: 0, peds: []});
+    o.u[s.ub] = r3((o.u[s.ub] || 0) + s.t);
+    o.tot = r3(o.tot + s.t);
     if (!o.peds.includes(s.ped)) o.peds.push(s.ped);
   });
-  const saldos = Object.values(salMap).map(o => Object.assign(o, {t: r3(o.t)}));
-  saldos.sort((a, b) => (a.sem + a.cons + a.nave).localeCompare(b.sem + b.cons + b.nave));
+  const saldos = Object.values(salMap);
+  saldos.sort((a, b) => (a.sem + a.nave).localeCompare(b.sem + b.nave));
   DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready, saldos: saldos};
 }
-// Semana martes a lunes: devuelve el martes de inicio como clave
+// Semana martes a lunes: martes de inicio como clave; numero = semana ISO del martes - 1 (regla del usuario)
+function isoWeek(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dow = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dow);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - y0) / 86400000 + 1) / 7);
+}
 function semanaMartes(iso){
   const d = isoToDate(iso);
   d.setDate(d.getDate() - ((d.getDay() - 2 + 7) % 7));
   const fin = new Date(d); fin.setDate(fin.getDate() + 6);
-  return {key: dateToISO(d), lbl: fdate(dateToISO(d)) + ' al ' + fdate(dateToISO(fin))};
+  const num = isoWeek(d) - 1;
+  return {key: dateToISO(d), num, lbl: 'Sem ' + num + ' · ' + fdate(dateToISO(d)) + ' al ' + fdate(dateToISO(fin))};
 }
 
 function ingest078(aoa, fname, nuevo){
@@ -1158,8 +1170,9 @@ function agingAnual(){
   const map = {};
   STK.rows.forEach(r => {
     const ym = pedYM(r.ped);
-    const k = ym ? String(ym.anio) : 'sin código';
-    const o = map[k] || (map[k] = {anio: k, bloq: 0, porg: 0, sine: 0, tot: 0});
+    const cn = STK.centros[r.centro] || r.centro;
+    const k = cn + '||' + (ym ? String(ym.anio) : 'sin código');
+    const o = map[k] || (map[k] = {centro: cn, anio: ym ? String(ym.anio) : 'sin código', bloq: 0, porg: 0, sine: 0, tot: 0});
     o.tot += r.libre;
     if ((r.alm === '002' || r.alm === '2') && !esSemi(r)){
       const {g} = stkGrupo(r);
@@ -1171,7 +1184,7 @@ function agingAnual(){
       }
     }
   });
-  return Object.values(map).sort((a, b) => a.anio.localeCompare(b.anio));
+  return Object.values(map).sort((a, b) => (a.centro + a.anio).localeCompare(b.centro + b.anio));
 }
 // SEMI en N° ped clte sin embarque ni fecha de entrega -> semielaborado redirigido
 function esSemi(r){ return /SEMI/i.test(r.oc || '') && !r.transp && !r.nave && !r.bk && !(r.ent && r.fent); }
@@ -1389,15 +1402,15 @@ function renderResumen(){
     $('resStock').innerHTML = h;
     // Por año del pedido
     const aa = agingAnual();
-    let ha = '<table style="min-width:520px"><thead><tr><th>Año pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Stock total año</th></tr></thead><tbody>';
+    let ha = '<table style="min-width:560px"><thead><tr><th>Centro</th><th>Año pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Stock total año</th></tr></thead><tbody>';
     let aTb = 0, aTp = 0, aTs = 0, aTt = 0;
     const anioAct = String(new Date().getFullYear());
     aa.forEach(o => {
       aTb += o.bloq; aTp += o.porg; aTs += o.sine; aTt += o.tot;
       const viejo = o.anio !== 'sin código' && o.anio < anioAct;
-      ha += `<tr class="det"><td>${viejo ? `<span class="pill bad"><b>${esc(o.anio)}</b></span>` : `<b>${esc(o.anio)}</b>`}</td><td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td><td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
+      ha += `<tr class="det"><td>${esc(o.centro)}</td><td>${viejo ? `<span class="pill bad"><b>${esc(o.anio)}</b></span>` : `<b>${esc(o.anio)}</b>`}</td><td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td><td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
     });
-    ha += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(aTb)}</td><td class="num">${nf0.format(aTp)}</td><td class="num">${nf0.format(aTs)}</td><td class="num">${nf0.format(aTt)}</td></tr></tbody></table>`;
+    ha += `<tr class="tot"><td colspan="2">Total</td><td class="num">${nf0.format(aTb)}</td><td class="num">${nf0.format(aTp)}</td><td class="num">${nf0.format(aTs)}</td><td class="num">${nf0.format(aTt)}</td></tr></tbody></table>`;
     $('resAnio').innerHTML = ha;
   } else {
     $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
@@ -1806,52 +1819,77 @@ function setTab(t){
   refreshSelects();
   render();
 }
-// ================== SALDOS CONTABILIZADOS ==================
+// ================== SALDOS CONTABILIZADOS (matriz semana x nave, ubicaciones en columnas) ==================
 const SALF = {sem: '', cons: '', nave: '', ub: '', ord: 'sem'};
+const SAL_OPEN = new Set();
 function salSet(campo, v){ SALF[campo] = v; renderSaldos(); }
+function salToggle(sem){
+  if (SAL_OPEN.has(sem)) SAL_OPEN.delete(sem); else SAL_OPEN.add(sem);
+  renderSaldos();
+}
+function salExpand(abrir){
+  SAL_OPEN.clear();
+  if (abrir) ((DET && DET.saldos) || []).forEach(s => SAL_OPEN.add(s.sem));
+  renderSaldos();
+}
+const UBIC_ORDEN = ['CORONEL','VALDIVIA','MAULE','DYC SAI','DYC THNO','PC VALP','BOD. NAC.'];
 function renderSaldos(){
   const all = (DET && DET.saldos) || [];
   const opt = (vals, cur, lbl) => `<option value="">${lbl}</option>` + vals.map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(v)}</option>`).join('');
   const semanas = [...new Set(all.map(s => s.sem))].sort();
   const semLbl = {};
   all.forEach(s => semLbl[s.sem] = s.semLbl);
-  let list = all.filter(s => (!SALF.sem || s.sem === SALF.sem) && (!SALF.cons || s.cons === SALF.cons) && (!SALF.nave || s.nave === SALF.nave) && (!SALF.ub || s.ub === SALF.ub));
-  if (SALF.ord === 'saldo') list = list.slice().sort((a, b) => b.t - a.t);
+  let list = all.filter(s => (!SALF.sem || s.sem === SALF.sem) && (!SALF.cons || s.cons === SALF.cons) && (!SALF.nave || s.nave === SALF.nave) && (!SALF.ub || (s.u[SALF.ub] || 0) > 0));
+  if (SALF.ord === 'saldo') list = list.slice().sort((a, b) => b.tot - a.tot);
   else if (SALF.ord === 'nave') list = list.slice().sort((a, b) => (a.nave + a.sem).localeCompare(b.nave + b.sem));
-  else if (SALF.ord === 'cons') list = list.slice().sort((a, b) => (a.cons + a.sem + a.nave).localeCompare(b.cons + b.sem + b.nave));
-  else if (SALF.ord === 'ub') list = list.slice().sort((a, b) => (a.ub + a.sem).localeCompare(b.ub + b.sem));
-  let tt = 0;
-  list.forEach(s => tt += s.t);
+  const cols = UBIC_ORDEN.filter(u => all.some(s => (s.u[u] || 0) > 0));
   const naves = [...new Set(all.map(s => s.nave))].sort();
   const conss = [...new Set(all.map(s => s.cons))].sort();
-  const ubs = [...new Set(all.map(s => s.ub))].sort();
+  let tt = 0;
+  list.forEach(s => tt += SALF.ub ? (s.u[SALF.ub] || 0) : s.tot);
   $('summary').innerHTML =
-    `<span>Saldos de embarques <b>contabilizados</b> (zarpe real, semana martes a lunes): <b>${list.length}</b> líneas</span>` +
+    `<span>Saldos de embarques <b>contabilizados</b> · zarpe real · semana martes a lunes (n° −1): <b>${list.length}</b> naves</span>` +
     `<span>Total saldo: <b>${fmt(tt)} t</b></span>` +
     (!DET || !DET.saldos ? '<span class="prog">— vuelve a subir el detalle para calcular esto</span>' : '');
   let h = '<div class="filters" style="padding:10px 10px 0">' +
     `<select class="btn" onchange="salSet('sem', this.value)"><option value="">Semana: todas</option>${semanas.map(sk => `<option value="${esc(sk)}" ${sk === SALF.sem ? 'selected' : ''}>${esc(semLbl[sk] || sk)}</option>`).join('')}</select>` +
     `<select class="btn" onchange="salSet('cons', this.value)">${opt(conss, SALF.cons, 'Consolidador: todos')}</select>` +
     `<select class="btn" onchange="salSet('nave', this.value)">${opt(naves, SALF.nave, 'Nave: todas')}</select>` +
-    `<select class="btn" onchange="salSet('ub', this.value)">${opt(ubs, SALF.ub, 'Ubicación: todas')}</select>` +
-    `<select class="btn" onchange="salSet('ord', this.value)"><option value="sem" ${SALF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="cons" ${SALF.ord === 'cons' ? 'selected' : ''}>Orden: consolidador</option><option value="nave" ${SALF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option><option value="ub" ${SALF.ord === 'ub' ? 'selected' : ''}>Orden: ubicación</option><option value="saldo" ${SALF.ord === 'saldo' ? 'selected' : ''}>Orden: mayor saldo</option></select>` +
+    `<select class="btn" onchange="salSet('ub', this.value)"><option value="">Ubicación: todas</option>${UBIC_ORDEN.map(u => `<option value="${esc(u)}" ${u === SALF.ub ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select>` +
+    `<select class="btn" onchange="salSet('ord', this.value)"><option value="sem" ${SALF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="nave" ${SALF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option><option value="saldo" ${SALF.ord === 'saldo' ? 'selected' : ''}>Orden: mayor saldo</option></select>` +
+    `<button class="btn" onclick="salExpand(true)">▾ Abrir todo</button><button class="btn" onclick="salExpand(false)">▸ Cerrar todo</button>` +
     '</div>';
   if (!list.length){
     $('tbl').innerHTML = h + '<div class="empty">Sin saldos con los filtros actuales ✅</div>';
     return;
   }
-  h += '<table><thead><tr><th>Semana (mar–lun)</th><th>Consolidador</th><th>Nave</th><th>Ubicación del saldo</th><th class="num">Saldo t</th><th class="num">Pedidos</th></tr></thead><tbody>';
-  let cur = null, st2 = 0;
-  const conSub = SALF.ord === 'sem';
-  const sub = () => { if (conSub && cur !== null) h += `<tr class="tot"><td colspan="4">Total semana ${esc(semLbl[cur] || cur)}</td><td class="num">${fmt(st2)}</td><td></td></tr>`; };
-  list.forEach(s => {
-    if (conSub && s.sem !== cur){ sub(); cur = s.sem; st2 = 0; }
-    st2 += s.t;
-    const esPlanta = s.ub.includes('planta');
-    h += `<tr class="det" title="${esc(s.peds.join(', '))}"><td class="mono">${esc(s.semLbl)}</td><td>${esc(s.cons)}</td><td><b>${esc(s.nave)}</b></td><td><span class="pill ${esPlanta ? 'bad' : 'warn'}">${esc(s.ub)}</span></td><td class="num"><b>${fmt(s.t)}</b></td><td class="num">${s.peds.length}</td></tr>`;
-  });
-  sub();
-  h += `<tr class="tot"><td colspan="4">Total general</td><td class="num">${fmt(tt)}</td><td></td></tr></tbody></table>`;
+  h += '<table><thead><tr><th>Semana / Nave</th>' + cols.map(u => `<th class="num">${esc(u)}</th>`).join('') + '<th class="num">Total</th><th class="num">Pedidos</th></tr></thead><tbody>';
+  const agrupar = SALF.ord === 'sem';
+  const porSem = {};
+  list.forEach(s => { (porSem[s.sem] = porSem[s.sem] || []).push(s); });
+  const filaNave = s => `<tr class="det" title="${esc(s.peds.join(', '))} · ${esc(s.cons)}"><td style="padding-left:${agrupar ? 30 : 10}px"><b>${esc(s.nave)}</b> <span class="cli">${esc(s.cons)}</span></td>` +
+    cols.map(u => `<td class="num">${(s.u[u] || 0) > 0 ? fmt(s.u[u]) : '—'}</td>`).join('') +
+    `<td class="num"><b>${fmt(s.tot)}</b></td><td class="num">${s.peds.length}</td></tr>`;
+  if (agrupar){
+    Object.keys(porSem).sort().forEach(sk => {
+      const g = porSem[sk];
+      const abierto = SAL_OPEN.has(sk);
+      const sums = {};
+      let gt = 0;
+      g.forEach(s => { cols.forEach(u => sums[u] = (sums[u] || 0) + (s.u[u] || 0)); gt += s.tot; });
+      h += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="salToggle('${esc(sk)}')"><td><span class="caret">▾</span><b>${esc(semLbl[sk])}</b> <span class="cnt">· ${g.length} naves</span></td>` +
+        cols.map(u => `<td class="num">${sums[u] > 0.05 ? `<b>${fmt(sums[u])}</b>` : '—'}</td>`).join('') +
+        `<td class="num"><b>${fmt(gt)}</b></td><td></td></tr>`;
+      if (abierto) g.forEach(s => { h += filaNave(s); });
+    });
+  } else {
+    list.forEach(s => { h += filaNave(s); });
+  }
+  const totU = {};
+  let totG = 0;
+  list.forEach(s => { cols.forEach(u => totU[u] = (totU[u] || 0) + (s.u[u] || 0)); totG += s.tot; });
+  h += `<tr class="tot"><td>Total general</td>` + cols.map(u => `<td class="num">${fmt(totU[u] || 0)}</td>`).join('') + `<td class="num">${fmt(totG)}</td><td></td></tr>`;
+  h += '</tbody></table>';
   $('tbl').innerHTML = h;
 }
 const CONS_MATCH = {'DYC SAI': ['sai'], 'PC VALP': ['columbo','valpara'], 'CORONEL': ['coronel'], 'BOD. NACIONAL': ['bodega','nacional']};
@@ -2299,8 +2337,9 @@ function buildExport(){
     const ry = readyAoa();
     if (ry.length > 1) out['Ready vs corte'] = ry;
     if (DET.saldos && DET.saldos.length){
-      out['Saldos contabilizados'] = [['Semana (mar-lun)','Consolidador','Nave','Ubicacion','Saldo t','Pedidos']]
-        .concat(DET.saldos.map(s => [s.semLbl, s.cons, s.nave, s.ub, s.t, s.peds.join(', ')]));
+      const colsU = UBIC_ORDEN.filter(u => DET.saldos.some(s => (s.u[u] || 0) > 0));
+      out['Saldos contabilizados'] = [['Semana (mar-lun)','Nave','Consolidador'].concat(colsU).concat(['Total t','Pedidos'])]
+        .concat(DET.saldos.map(s => [s.semLbl, s.nave, s.cons].concat(colsU.map(u => s.u[u] ? r3(s.u[u]) : '')).concat([s.tot, s.peds.join(', ')])));
     }
   }
   if (DET && DET.alert && DET.alert.length){
@@ -2434,10 +2473,10 @@ function agingAoa(centro){
   return aoa;
 }
 function agingAnualAoa(){
-  const aoa = [['Año pedido','Bloqueo credito','Por gestionar','Sin entrega','Stock total año']];
+  const aoa = [['Centro','Año pedido','Bloqueo credito','Por gestionar','Sin entrega','Stock total año']];
   let tb = 0, tp = 0, ts = 0, tt = 0;
-  agingAnual().forEach(o => { tb += o.bloq; tp += o.porg; ts += o.sine; tt += o.tot; aoa.push([o.anio, Math.round(o.bloq), Math.round(o.porg), Math.round(o.sine), Math.round(o.tot)]); });
-  aoa.push(['Total', Math.round(tb), Math.round(tp), Math.round(ts), Math.round(tt)]);
+  agingAnual().forEach(o => { tb += o.bloq; tp += o.porg; ts += o.sine; tt += o.tot; aoa.push([o.centro, o.anio, Math.round(o.bloq), Math.round(o.porg), Math.round(o.sine), Math.round(o.tot)]); });
+  aoa.push(['Total', '', Math.round(tb), Math.round(tp), Math.round(ts), Math.round(tt)]);
   return aoa;
 }
 function resumenStockAoa(){
@@ -2504,8 +2543,10 @@ function exportPDF(){
     sections = [['Carga gestionada — resumen por nave (status Pendiente)', resumenG()],
                 ['Carga no gestionada — resumen por consolidador y país', resumenN()]];
     if (DET.saldos && DET.saldos.length){
-      sections.push(['Saldos de embarques contabilizados (semana martes a lunes por zarpe real)',
-        [['Semana','Consolidador','Nave','Ubicación','Saldo t']].concat(DET.saldos.map(s => [s.semLbl, s.cons, s.nave, s.ub, s.t]))]);
+      const colsU = UBIC_ORDEN.filter(u => DET.saldos.some(s => (s.u[u] || 0) > 0));
+      sections.push(['Saldos de embarques contabilizados (semana martes a lunes por zarpe real, n° −1)',
+        [['Semana','Nave','Consolidador'].concat(colsU).concat(['Total t'])]
+          .concat(DET.saldos.map(s => [s.semLbl, s.nave, s.cons].concat(colsU.map(u => s.u[u] ? Math.round(s.u[u] * 10) / 10 : '')).concat([Math.round(s.tot * 10) / 10])))]);
     }
     fname = 'carga'; titulo = 'Carga marítima con stock en planta';
   } else if (MAIN === 'prio'){
@@ -2603,6 +2644,18 @@ function exportPDF(){
 }
 
 // ================== init ==================
+// Secciones plegables: clic en cualquier titulo de seccion la cierra/abre
+document.addEventListener('click', e => {
+  const t = e.target.closest('.secttl');
+  if (!t) return;
+  const cerrar = !t.classList.contains('closed');
+  t.classList.toggle('closed', cerrar);
+  let el = t.nextElementSibling;
+  while (el && !el.classList.contains('secttl')){
+    el.style.display = cerrar ? 'none' : '';
+    el = el.nextElementSibling;
+  }
+});
 window.APP = {ingestDetalle, ingest078, ingestTransporte, planAggs, planCalc, prioData, stkMax, buildExport,
   get DET(){return DET;}, get SAP(){return SAP;}, get TRANS(){return TRANS;}, refreshAll, persistData};
 restoreData();
