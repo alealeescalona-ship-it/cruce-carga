@@ -134,13 +134,37 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
   <div class="kpis" id="kpis" style="display:none"></div>
 
   <div class="tabs" id="mainTabs" style="display:none">
+    <button class="tab" id="mt_resumen" onclick="setMain('resumen')">⭐ Resumen</button>
     <button class="tab active" id="mt_carga" onclick="setMain('carga')">📦 Carga</button>
     <button class="tab" id="mt_prio" onclick="setMain('prio')">🚢 Prioridades naves</button>
     <button class="tab" id="mt_desp" onclick="setMain('desp')">🚛 Despachos (078)</button>
     <button class="tab" id="mt_trans" onclick="setMain('trans')">🚚 Transporte</button>
     <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
+    <button class="tab" id="mt_sim" onclick="setMain('sim')">🧮 Simulador</button>
     <button class="tab" id="mt_plan" onclick="setMain('plan')">📋 Planificación</button>
   </div>
+
+  <!-- ============ TAB RESUMEN ============ -->
+  <section id="sec_resumen" style="display:none">
+    <div class="kpis" id="resKpis"></div>
+    <div class="secttl">Stock por grupo (073)</div>
+    <div class="tblbox"><div id="resStock"></div></div>
+    <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido, hoy o mañana)</div>
+    <div class="tblbox"><div id="resNaves"></div></div>
+    <div class="secttl">🏭 Embarques gestionados con falta de producción</div>
+    <p class="note">Pedidos con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
+    <div class="tblbox"><div id="resFalta"></div></div>
+  </section>
+
+  <!-- ============ TAB SIMULADOR ============ -->
+  <section id="sec_sim" style="display:none">
+    <p class="note">Stock W inicial = último 073 subido (histórico diario). Escribe las <b>UT a despachar</b> y las <b>Ton a producir</b> de cada día; Ton despachadas = UT × ton/UT despacho, y Stock W final = inicial + producidas − despachadas, encadenado día a día.</p>
+    <div class="subtabs" id="simCentros"></div>
+    <div class="summary" id="simIni"></div>
+    <div class="tblbox"><div id="tblSim"></div></div>
+    <div class="secttl">Histórico stock 073</div>
+    <div class="tblbox"><div id="tblHist"></div></div>
+  </section>
 
   <!-- ============ TAB CARGA ============ -->
   <section id="sec_carga" style="display:none">
@@ -228,6 +252,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="secttl">Programa del día vs despachado — <span id="plName2"></span></div>
     <p class="note" id="planNote"></p>
     <div class="subtabs">
+      <button class="btn" onclick="copyCorreo()"><b>📧 Copiar correo para plantas</b></button>
       <button class="btn" id="btnAuto" onclick="usarTransporte()" style="display:none">↺ Usar programa transporte (quitar ajustes)</button>
       <button class="btn" onclick="resetPlan()">Limpiar programa de esta planta</button>
     </div>
@@ -765,6 +790,8 @@ const CLIENTES_DIRECTOS = [['EDIPAC','Edipac'], ['MM PACKAGING','MM Packaging'],
 let DET = null, SAP = null, TRANS = null, STK = null;
 let MAIN = 'carga', TAB = 'G', PLANTA = 'Maule', STKC = '';
 let CHECKS = lsGet('cruceChecks', {});
+let HIST = lsGet('cruceHist073', {});   // {fechaISO: {centros:{code:nombre}, g:{code:{total,mar,int,chdir,chbod,semi,p09}}}}
+let SIM = Object.assign({centro:'', iniOv:{}, dias:{}}, lsGet('cruceSim', {}));  // dias: {centro: {fechaISO: {ut, prod}}}
 let CFG = Object.assign({tPlan:28, tDesp:27}, lsGet('cruceCfg', {}));
 let PLAN = lsGet('crucePlan3', {progO:{Maule:{},Valdivia:{}}, man:{Maule:{},Valdivia:{}}});
 if (!PLAN.progO) PLAN = {progO:{Maule:{},Valdivia:{}}, man:{Maule:{},Valdivia:{}}};
@@ -829,16 +856,28 @@ function ingestDetalle(aoa, fname){
     fcd: col('fecha corte documental'), fzp: col('fecha zarpe plan'), femb: col('fecha embarque'),
     sem: col('semana embarque'), bk: col('booking'), ges: col('gestion'),
     cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
-    cCor: col('coronel'), cBod: col('stock bod nacionales')
+    cCor: col('coronel'), cBod: col('stock bod nacionales'),
+    ge: col('cant entrega ton'), py: col('ton producido ov')
   };
   // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
   const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const alertMap = {};
+  const faltaMap = {};
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r];
     if (!a || C.cat < 0 || !/MARITIM/i.test(String(a[C.cat] || ''))) continue;
     const ma = numv(a[C.ma]), va = numv(a[C.va]);
+    // Falta de produccion: gestionados (embarque real) donde lo producido no alcanza la cantidad de entrega
+    if (String(a[C.et] || '').trim() !== 'SI'){
+      const geV = numv(a[C.ge]), pyV = numv(a[C.py]);
+      if (geV > 0){
+        const pedF = String(a[C.ped] || '');
+        const f = faltaMap[pedF] || (faltaMap[pedF] = {ped: pedF, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
+          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: dstr(a[C.fcd]), ge: 0, py: 0});
+        f.ge += geV; f.py += pyV;
+      }
+    }
     // Alerta: stock repartido entre consolidadores (independiente del stock en planta)
     let tieneCons = false;
     CONS_COLS.forEach(([k]) => { if (C[k] >= 0 && numv(a[C[k]]) > 0) tieneCons = true; });
@@ -857,6 +896,7 @@ function ingestDetalle(aoa, fname){
       cli: String(a[C.cli] || ''), pais: String(a[C.pais] || ''), paisd: String(a[C.paisd] || ''),
       pto: String(a[C.pto] || ''), prod: String(a[C.prod] || ''), pl: String(a[C.pl] || ''),
       ton: r3(numv(a[C.ton])), ma: r3(ma), va: r3(va),
+      ge: r3(numv(a[C.ge])), py: r3(numv(a[C.py])),
       cons: String(a[C.cons] || ''), nave: String(a[C.nave] || ''),
       fcd: dstr(a[C.fcd]), fzp: dstr(a[C.fzp]), femb: dstr(a[C.femb]),
       sem: String(a[C.sem] == null ? '' : a[C.sem]), bk: String(a[C.bk] || ''), ges: String(a[C.ges] || '')
@@ -866,7 +906,10 @@ function ingestDetalle(aoa, fname){
   // Alerta solo para pedidos CON embarque real (nave asignada) y stock en 2+ consolidadores
   const alert = Object.values(alertMap).filter(o => Object.keys(o.s).length >= 2 && o.et === 'NO');
   alert.sort((a, b) => (a.cons + a.ped).localeCompare(b.cons + b.ped));
-  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert};
+  const falta = Object.values(faltaMap).map(f => Object.assign(f, {falta: r3(f.ge - f.py)}))
+    .filter(f => f.falta > 0.005);
+  falta.sort((a, b) => b.falta - a.falta);
+  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta};
 }
 
 function ingest078(aoa, fname, nuevo){
@@ -975,6 +1018,18 @@ function ingest073(aoa, fname){
   }
   STK = {file: fname, rows, centros};
   STKC = Object.keys(centros)[0] || '';
+  // Historico diario del 073 (una foto por dia; re-subir el mismo dia la reemplaza)
+  const hoy = dateToISO(new Date());
+  const g = {};
+  Object.keys(centros).forEach(c => {
+    const S = stkCalc(c);
+    g[c] = {total: r3(S.total), mar: r3(S.bloqM + S.gestM + S.porgM + S.sineM),
+      int: r3(S.bloqI + S.gestI + S.porgI + S.sineI),
+      chdir: r3(Object.values(S.chdir).reduce((a, b) => a + b, 0)), chbod: r3(S.chbod),
+      semi: r3(S.semi002), p09: r3(S.p09)};
+  });
+  HIST[hoy] = {centros: Object.assign({}, centros), g};
+  lsSet('cruceHist073', HIST);
 }
 // Clasificación 073 (almacén 002): grupo por país/cliente y estado por embarque/entrega/bloqueo
 function stkGrupo(r){
@@ -1154,18 +1209,229 @@ function kpis(){
 
 function setMain(m){
   MAIN = m;
-  ['carga','prio','desp','trans','stock','plan'].forEach(x => {
+  ['resumen','carga','prio','desp','trans','stock','sim','plan'].forEach(x => {
     $('mt_' + x).classList.toggle('active', x === m);
     let show = x === m;
     if ((x === 'carga' || x === 'prio') && !DET) show = false;
     $('sec_' + x).style.display = show ? '' : 'none';
   });
+  if (m === 'resumen') renderResumen();
   if (m === 'carga' && DET){ if (TAB === 'A'){ setTab('A'); } else { refreshSelects(); render(); } }
   if (m === 'prio' && DET) renderPrio();
   if (m === 'desp') renderDesp();
   if (m === 'trans') renderTrans();
   if (m === 'stock') renderStock();
+  if (m === 'sim') renderSim();
   if (m === 'plan') renderPlan();
+}
+// ================== TAB RESUMEN ==================
+function renderResumen(){
+  let k = '';
+  if (DET){
+    let gm = 0, gv = 0, nm = 0, nv = 0;
+    gPend().forEach(r => { gm += r.ma; gv += r.va; });
+    nRows().forEach(r => { nm += r.ma; nv += r.va; });
+    k += `<div class="kpi g"><div class="lbl">Carga gestionada</div><div class="val">${fmt(gm + gv)} t</div><div class="det">Maule ${fmt(gm)} · Valdivia ${fmt(gv)}</div></div>`;
+    k += `<div class="kpi n"><div class="lbl">Carga no gestionada</div><div class="val">${fmt(nm + nv)} t</div><div class="det">Maule ${fmt(nm)} · Valdivia ${fmt(nv)}</div></div>`;
+  }
+  ['Maule','Valdivia'].forEach(pl => {
+    const pc = planCalc(pl);
+    let sp = 0, sd = 0;
+    pc.rows.forEach(x => { sp += x.prog; sd += x.desp; });
+    if (sp > 0 || sd > 0) k += `<div class="kpi"><div class="lbl">UT ${pl}</div><div class="val">${fmtU(sd)} / ${fmtU(sp)}</div><div class="det">despachadas / programadas</div></div>`;
+  });
+  if (DET && DET.alert) k += `<div class="kpi ${DET.alert.length ? 'n' : 'g'}"><div class="lbl">Stock repartido</div><div class="val">${DET.alert.length}</div><div class="det">embarques en 2+ consolidadores</div></div>`;
+  $('resKpis').innerHTML = k || '<div class="empty">Sube el detalle de cartulinas para ver el resumen de carga.</div>';
+  // Stock por grupo (sin desgloses)
+  if (STK){
+    const centros = Object.keys(STK.centros);
+    let h = '<table style="min-width:520px"><thead><tr><th>Grupo</th>' + centros.map(c => `<th class="num">${esc(STK.centros[c])}</th>`).join('') + (centros.length > 1 ? '<th class="num">Total</th>' : '') + '</tr></thead><tbody>';
+    const G = {};
+    centros.forEach(c => {
+      const S = stkCalc(c);
+      G[c] = {'Marítimo': S.bloqM + S.gestM + S.porgM + S.sineM, 'Terrestre Internacional': S.bloqI + S.gestI + S.porgI + S.sineI,
+        'Chile Directo': Object.values(S.chdir).reduce((a, b) => a + b, 0), 'Chile Bodega Nacional': S.chbod};
+    });
+    ['Marítimo','Terrestre Internacional','Chile Directo','Chile Bodega Nacional'].forEach(gr => {
+      let t = 0;
+      h += `<tr class="det"><td><b>${gr}</b></td>` + centros.map(c => { t += G[c][gr]; return `<td class="num">${nf0.format(G[c][gr])}</td>`; }).join('') + (centros.length > 1 ? `<td class="num"><b>${nf0.format(t)}</b></td>` : '') + '</tr>';
+    });
+    let tt = 0;
+    h += `<tr class="tot"><td>Total</td>` + centros.map(c => { const s = Object.values(G[c]).reduce((a, b) => a + b, 0); tt += s; return `<td class="num">${nf0.format(s)}</td>`; }).join('') + (centros.length > 1 ? `<td class="num">${nf0.format(tt)}</td>` : '') + '</tr>';
+    h += '</tbody></table>';
+    $('resStock').innerHTML = h;
+  } else {
+    $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
+  }
+  // Naves urgentes
+  if (DET){
+    const urg = prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)));
+    if (urg.length){
+      let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Stk Máximo</th><th>Corte doc.</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+      urg.forEach(x => {
+        const u = urgency(x.stk);
+        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono">${fdate(x.stk)}${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.fcd)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+      });
+      h += '</tbody></table>';
+      $('resNaves').innerHTML = h;
+    } else $('resNaves').innerHTML = '<div class="empty">Sin naves urgentes ✅</div>';
+    const fal = (DET.falta || []).slice(0, 40);
+    if (fal.length){
+      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
+      let tf = 0;
+      fal.forEach(f => {
+        tf += f.falta;
+        h += `<tr class="det"><td class="mono">${esc(f.ped)}</td><td>${esc(f.cli)}</td><td>${esc(f.nave)}</td><td class="cli">${esc(f.cons)}</td><td class="mono">${fdate(f.fcd)}</td><td class="num">${fmt(f.ge)}</td><td class="num">${fmt(f.py)}</td><td class="num"><span class="neg"><b>${fmt(f.falta)}</b></span></td></tr>`;
+      });
+      h += `<tr class="tot"><td colspan="7">Total falta de producción (${fal.length} pedidos)</td><td class="num">${fmt(tf)}</td></tr></tbody></table>`;
+      $('resFalta').innerHTML = h;
+    } else $('resFalta').innerHTML = '<div class="empty">' + (DET.falta ? 'Sin faltas de producción ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
+  } else {
+    $('resNaves').innerHTML = '<div class="empty">Sube el detalle de cartulinas.</div>';
+    $('resFalta').innerHTML = '';
+  }
+}
+// ================== TAB SIMULADOR ==================
+function simCentros(){
+  const set = {};
+  Object.values(HIST).forEach(hh => Object.keys(hh.centros || {}).forEach(c => set[c] = hh.centros[c]));
+  if (STK) Object.keys(STK.centros).forEach(c => set[c] = STK.centros[c]);
+  return set;
+}
+function simIniFor(centro){
+  if (SIM.iniOv[centro] !== undefined && SIM.iniOv[centro] !== '') return {v: numv(SIM.iniOv[centro]), src: 'manual'};
+  const fechas = Object.keys(HIST).sort().reverse();
+  for (const f of fechas){ if (HIST[f].g && HIST[f].g[centro]) return {v: HIST[f].g[centro].total, src: '073 del ' + fdate(f)}; }
+  return {v: 0, src: 'sin 073'};
+}
+function setSimCentro(c){ SIM.centro = c; lsSet('cruceSim', SIM); renderSim(); }
+function simIniOv(v){ SIM.iniOv[SIM.centro] = v; lsSet('cruceSim', SIM); renderSim(); }
+function simProdDef(v){ if (!SIM.prodDef) SIM.prodDef = {}; SIM.prodDef[SIM.centro] = numv(v); lsSet('cruceSim', SIM); renderSim(); }
+function simStockU(v){ if (!SIM.stockU) SIM.stockU = {}; SIM.stockU[SIM.centro] = numv(v); lsSet('cruceSim', SIM); renderSim(); }
+function simDia(f, campo, v){
+  if (!SIM.dias[SIM.centro]) SIM.dias[SIM.centro] = {};
+  if (!SIM.dias[SIM.centro][f]) SIM.dias[SIM.centro][f] = {};
+  if (String(v).trim() === '') delete SIM.dias[SIM.centro][f][campo];
+  else SIM.dias[SIM.centro][f][campo] = numv(v);
+  lsSet('cruceSim', SIM);
+  renderSim();
+}
+function simFilas(c){
+  const ini = simIniFor(c);
+  const prodDef = numv((SIM.prodDef || {})[c]);
+  const stockU = numv((SIM.stockU || {})[c]);
+  let stock = SIM.iniOv[c] !== undefined && SIM.iniOv[c] !== '' ? numv(SIM.iniOv[c]) : ini.v;
+  const filas = [];
+  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const datos = (SIM.dias[c] || {});
+  for (let i = 0; i < 21; i++){
+    const d = new Date(d0); d.setDate(d.getDate() + i);
+    const f = dateToISO(d);
+    const dd = datos[f] || {};
+    const prod = dd.prod !== undefined ? numv(dd.prod) : prodDef;
+    const ut = numv(dd.ut);
+    const desp = ut * CFG.tDesp;
+    const varn = desp - prod;
+    const fin = stock - varn;
+    filas.push({f, ini: stock, prod, prodMan: dd.prod !== undefined, ut, utMan: dd.ut !== undefined, desp, varn, fin, stockU, totFin: fin + stockU});
+    stock = fin;
+  }
+  return filas;
+}
+function renderSim(){
+  const centros = simCentros();
+  const keys = Object.keys(centros);
+  if (!keys.length){
+    $('simCentros').innerHTML = '';
+    $('simIni').innerHTML = '';
+    $('tblSim').innerHTML = '<div class="empty">Sube el 073 para partir el simulador con el stock real.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+    $('tblHist').innerHTML = '';
+    return;
+  }
+  if (!keys.includes(SIM.centro)) SIM.centro = keys[0];
+  $('simCentros').innerHTML = '<span style="font-weight:700">Centro:</span> ' + keys.map(c =>
+    `<button class="subtab ${c === SIM.centro ? 'active' : ''}" onclick="setSimCentro('${esc(c)}')">${esc(centros[c])}</button>`).join('');
+  const ini = simIniFor(SIM.centro);
+  const prodDef = numv((SIM.prodDef || {})[SIM.centro]);
+  const stockU = numv((SIM.stockU || {})[SIM.centro]);
+  $('simIni').innerHTML = `<span>Stock W inicial: <input class="cell" style="width:90px" type="number" step="1" value="${SIM.iniOv[SIM.centro] !== undefined && SIM.iniOv[SIM.centro] !== '' ? numv(SIM.iniOv[SIM.centro]) : Math.round(ini.v)}" onchange="simIniOv(this.value)"> t <span class="prog">(${esc(ini.src)})</span></span>` +
+    `<span>Producción diaria: <input class="cell" style="width:80px" type="number" step="1" min="0" value="${prodDef || ''}" onchange="simProdDef(this.value)" title="Se usa en todos los días; puedes cambiar días puntuales en la tabla"> t</span>` +
+    `<span>Stock U: <input class="cell" style="width:80px" type="number" step="1" min="0" value="${stockU || ''}" onchange="simStockU(this.value)" title="Stock que se suma al total final"> t</span>` +
+    `<span class="prog">t/UT: ${CFG.tDesp}</span>` +
+    `<button class="btn" onclick="if(confirm('¿Borrar UT, producción y ajustes del simulador de este centro?')){ delete SIM.dias[SIM.centro]; delete SIM.iniOv[SIM.centro]; if(SIM.prodDef) delete SIM.prodDef[SIM.centro]; if(SIM.stockU) delete SIM.stockU[SIM.centro]; lsSet('cruceSim', SIM); renderSim(); }">Limpiar simulador</button>`;
+  const DIAS_NOM = ['dom','lun','mar','mié','jue','vie','sáb'];
+  let h = '<table style="min-width:860px"><thead><tr><th>Fecha</th><th class="num">Stock W Inicial</th><th class="num">Producción</th><th class="num">UT</th><th class="num">Despacho (ton)</th><th class="num">Variación (ton)</th><th class="num">Stock W Final</th><th class="num">Stock U</th><th class="num">Stock Total Final</th></tr></thead><tbody>';
+  simFilas(SIM.centro).forEach(x => {
+    const dnom = DIAS_NOM[isoToDate(x.f).getDay()];
+    const rojo = x.ut === 0;
+    h += `<tr class="det"><td class="mono"><span class="${rojo ? 'neg' : ''}"><b>${dnom} ${fdate(x.f)}</b></span></td><td class="num">${nf0.format(x.ini)}</td>` +
+      `<td class="num"><input class="cell" type="number" step="1" min="0" value="${x.prodMan ? x.prod : ''}" placeholder="${prodDef ? nf0.format(prodDef) : '0'}" onchange="simDia('${x.f}','prod',this.value)"></td>` +
+      `<td class="num"><input class="cell" style="width:60px" type="number" step="1" min="0" value="${x.utMan ? x.ut : ''}" onchange="simDia('${x.f}','ut',this.value)"></td>` +
+      `<td class="num">${nf0.format(x.desp)}</td><td class="num"><span class="${x.varn < 0 ? '' : ''}">${nf0.format(x.varn)}</span></td>` +
+      `<td class="num"><b class="${x.fin < 0 ? 'neg' : ''}">${nf0.format(x.fin)}</b></td>` +
+      `<td class="num">${nf0.format(x.stockU)}</td><td class="num"><b>${nf0.format(x.totFin)}</b></td></tr>`;
+  });
+  h += '</tbody></table>';
+  $('tblSim').innerHTML = h;
+  // Historico
+  const fechas = Object.keys(HIST).sort().reverse();
+  if (fechas.length){
+    let h2 = '<table style="min-width:420px"><thead><tr><th>Fecha 073</th>' + keys.map(c => `<th class="num">${esc(centros[c])} t</th>`).join('') + '</tr></thead><tbody>';
+    fechas.forEach(f => {
+      h2 += `<tr class="det"><td class="mono">${fdate(f)}</td>` + keys.map(c => {
+        const gg = HIST[f].g && HIST[f].g[c];
+        return `<td class="num">${gg ? nf0.format(gg.total) : '—'}</td>`;
+      }).join('') + '</tr>';
+    });
+    h2 += '</tbody></table>';
+    $('tblHist').innerHTML = h2;
+  } else $('tblHist').innerHTML = '<div class="empty">Aún no hay histórico: se guarda una foto cada día que subas el 073.</div>';
+}
+// ================== CORREO PLANIFICACION ==================
+function copyCorreo(){
+  if (!DET) return toast('Sube el detalle primero');
+  const {porG, gest} = planAggs(PLANTA);
+  const P = [['PUERTO CORONEL','PUERTO CORONEL'], ['DYC SAI','D&C SAI'], ['PC VALP','D&C VALPARAÍSO']];
+  const G = [['PUERTO CORONEL','PUERTO CORONEL'], ['DYC SAI','D&C SAI'], ['PC VALP','PTO COLUMBO VAP']];
+  const nfe = n => nf0.format(Math.round(n));
+  const td = 'border:1px solid #000;padding:3px 10px;';
+  const th = td + 'background:#c9c9c9;font-weight:bold;text-align:center;';
+  const sel = aggPed(nRows()).filter(p => CHECKS[p.ped]);
+  let selT = 0;
+  sel.forEach(p => { selT += (PLANTA === 'Valdivia' ? p.va : p.ma); });
+  let tp = 0, tg = 0;
+  let t1 = `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Status</td><td style="${th}">Consolidador</td><td style="${th}">Peso (Tons)</td></tr>`;
+  P.forEach(([lbl, key]) => { const t = porG[key] || 0; tp += t; t1 += `<tr><td style="${td}text-align:center">Por Gestionar</td><td style="${td}text-align:center">${lbl}</td><td style="${td}text-align:center">${nfe(t)}</td></tr>`; });
+  t1 += `<tr><td style="${td}font-weight:bold">Total Por Gestionar</td><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(tp)}</td></tr>`;
+  G.forEach(([lbl, key]) => { const t = gest[key] || 0; tg += t; t1 += `<tr><td style="${td}text-align:center">Gestionado</td><td style="${td}text-align:center">${lbl}</td><td style="${td}text-align:center">${nfe(t)}</td></tr>`; });
+  t1 += `<tr><td style="${td}font-weight:bold">Total Gestionado</td><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(tg)}</td></tr>`;
+  t1 += `<tr><td style="${td}"></td><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(tp + tg)}</td></tr></table>`;
+  const pc = planCalc(PLANTA);
+  let t2 = `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Destino</td><td style="${th}">UT Programadas</td><td style="${th}">UT Despachadas</td><td style="${th}">UT Por Despachar</td><td style="${th}">Toneladas por Despachar</td></tr>`;
+  let sp = 0, sd = 0;
+  pc.rows.forEach(x => {
+    sp += x.prog; sd += x.desp;
+    t2 += `<tr><td style="${td}">${esc(x.k)}</td><td style="${td}text-align:center">${nfe(x.prog)}</td><td style="${td}text-align:center">${nfe(x.desp)}</td><td style="${td}text-align:center">${nfe(x.por)}</td><td style="${td}text-align:center">${nfe(x.ton)}</td></tr>`;
+  });
+  t2 += `<tr><td style="${td}"></td><td style="${td}text-align:center;font-weight:bold">${nfe(sp)}</td><td style="${td}text-align:center;font-weight:bold">${nfe(sd)}</td><td style="${td}text-align:center;font-weight:bold">${nfe(sp - sd)}</td><td style="${td}text-align:center;font-weight:bold">${nfe((sp - sd) * CFG.tPlan)}</td></tr></table>`;
+  let t3 = '';
+  if (sel.length){
+    t3 = `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt"><b>• Carga autorizada a mover a consolidador:</b></p><table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Pedido</td><td style="${th}">Cliente</td><td style="${th}">País</td><td style="${th}">Consolidador</td><td style="${th}">Stock ${PLANTA} (t)</td><td style="${th}">Zarpe plan</td></tr>`;
+    sel.forEach(p => { t3 += `<tr><td style="${td}">${esc(p.ped)}</td><td style="${td}">${esc(p.cli)}</td><td style="${td}">${esc(p.paisd)}</td><td style="${td}">${esc(p.cons)}</td><td style="${td}text-align:center">${fmt(PLANTA === 'Valdivia' ? p.va : p.ma)}</td><td style="${td}text-align:center">${fdate(p.fzp)}</td></tr>`; });
+    t3 += `<tr><td style="${td}font-weight:bold" colspan="4">Total (${sel.length} pedidos)</td><td style="${td}text-align:center;font-weight:bold">${fmt(selT)}</td><td style="${td}"></td></tr></table>`;
+  }
+  const tonAut = sel.length ? selT : tp;
+  const ff = 'font-family:Calibri,Arial,sans-serif;font-size:11pt';
+  const html = `<div style="${ff}"><p>Estimados, buenas tardes</p>` +
+    `<p>Se adjunta${sel.length ? 'n' : ''} <b>${nfe(tonAut)} toneladas</b> autorizadas a mover a consolidador — Planta ${PLANTA}.</p>` +
+    `<p><b>• Escenario actual de planta:</b></p>${t1}` +
+    `<p><b>• Programa y despacho de planta:</b></p>${t2}${t3}</div>`;
+  const plano = 'Estimados, buenas tardes\n\nSe adjuntan ' + nfe(tonAut) + ' toneladas autorizadas a mover a consolidador — Planta ' + PLANTA + '.\n\n(pega en el correo para ver las tablas con formato)';
+  const done = () => toast('Correo copiado: pégalo en Outlook/Gmail y las tablas llegan con formato');
+  try {
+    const item = new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'}), 'text/plain': new Blob([plano], {type: 'text/plain'})});
+    navigator.clipboard.write([item]).then(done, () => fallbackCopy(html, done));
+  } catch(e){ fallbackCopy(html, done); }
 }
 // ================== TAB STOCK 073 ==================
 const STK_CATS = [
@@ -1762,6 +2028,8 @@ function buildExport(){
     out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
       .concat(aggPed(nRows()).map(p => [p.cons, p.paisd, p.ped, p.cli, p.prods.join(' / '), p.nave, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
     out['Prioridades'] = prioAoa();
+    const fa = faltaAoa();
+    if (fa.length > 1) out['Falta produccion'] = fa;
   }
   if (DET && DET.alert && DET.alert.length){
     const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
@@ -1789,6 +2057,20 @@ function buildExport(){
     if (semiAoa.length > 1) out['Semielaborado SEMI'] = semiAoa;
     const p09Aoa = mkAparte('P09');
     if (p09Aoa.length > 1) out['Stock P09'] = p09Aoa;
+    out['Resumen stock grupos'] = resumenStockAoa();
+  }
+  const fechasH = Object.keys(HIST).sort().reverse();
+  if (fechasH.length){
+    const centrosH = simCentros();
+    const keysH = Object.keys(centrosH);
+    const hh = [['Fecha 073'].concat(keysH.map(k => centrosH[k] + ' t'))];
+    fechasH.forEach(f => hh.push([f].concat(keysH.map(k => HIST[f].g && HIST[f].g[k] ? Math.round(HIST[f].g[k].total) : ''))));
+    out['Historico 073'] = hh;
+  }
+  if (Object.keys(simCentros()).length && SIM.centro){
+    const simA = [['Fecha','Stock W Inicial','Produccion','UT','Despacho (ton)','Variacion (ton)','Stock W Final','Stock U','Stock Total Final']];
+    simFilas(SIM.centro).forEach(x => simA.push([x.f, Math.round(x.ini), Math.round(x.prod), x.ut, Math.round(x.desp), Math.round(x.varn), Math.round(x.fin), Math.round(x.stockU), Math.round(x.totFin)]));
+    out['Simulador'] = simA;
   }
   if (DET || SAP || TRANS){
     const rows = [['Planta','Destino','Centro','UT programadas','UT despachadas','UT por despachar','Ton por despachar','Remanente t','Q UT proxima oferta']];
@@ -1870,9 +2152,57 @@ async function exportSeleccion(){
   const buf = await wb.xlsx.writeBuffer();
   saveFile('no_gestionada_seleccion_' + DET.corte + '.xlsx', buf);
 }
+function resumenStockAoa(){
+  const centros = Object.keys(STK.centros);
+  const aoa = [['Grupo'].concat(centros.map(c => STK.centros[c]))];
+  const G = {};
+  centros.forEach(c => {
+    const S = stkCalc(c);
+    G[c] = {'Marítimo': S.bloqM + S.gestM + S.porgM + S.sineM, 'Terrestre Internacional': S.bloqI + S.gestI + S.porgI + S.sineI,
+      'Chile Directo': Object.values(S.chdir).reduce((a, b) => a + b, 0), 'Chile Bodega Nacional': S.chbod};
+  });
+  ['Marítimo','Terrestre Internacional','Chile Directo','Chile Bodega Nacional'].forEach(gr => aoa.push([gr].concat(centros.map(c => Math.round(G[c][gr])))));
+  aoa.push(['Total'].concat(centros.map(c => Math.round(Object.values(G[c]).reduce((a, b) => a + b, 0)))));
+  return aoa;
+}
+function faltaAoa(){
+  return [['Pedido','Cliente','Nave','Consolidador','F corte doc','Entrega t','Producido t','Falta t']]
+    .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
+}
+function urgAoa(){
+  return [['Nave','Consolidador','Stk Maximo','Alerta','F corte doc','Maule t','Valdivia t']]
+    .concat(prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)))
+      .map(x => [x.nave, x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, r3(x.ma), r3(x.va)]));
+}
 function exportPDF(){
   let sections = [], fname = 'cruce', titulo = '';
-  if (MAIN === 'carga'){
+  if (MAIN === 'resumen'){
+    sections = [];
+    if (STK) sections.push(['Stock por grupo (073)', resumenStockAoa()]);
+    if (DET){
+      const u = urgAoa();
+      if (u.length > 1) sections.push(['Naves urgentes', u]);
+      const f = faltaAoa();
+      if (f.length > 1) sections.push(['Embarques gestionados con falta de producción', f]);
+    }
+    if (!sections.length) return toast('Aún no hay datos cargados');
+    fname = 'resumen'; titulo = 'Resumen ejecutivo';
+  } else if (MAIN === 'sim'){
+    const centros = simCentros();
+    if (!Object.keys(centros).length) return toast('Sube el 073 primero');
+    const c = SIM.centro;
+    const aoa = [['Fecha','Stock W Inicial','Produccion','UT','Despacho (ton)','Variacion (ton)','Stock W Final','Stock U','Stock Total Final']];
+    simFilas(c).forEach(x => aoa.push([x.f, Math.round(x.ini), Math.round(x.prod), x.ut, Math.round(x.desp), Math.round(x.varn), Math.round(x.fin), Math.round(x.stockU), Math.round(x.totFin)]));
+    sections = [['Simulador de stock — ' + (centros[c] || c), aoa]];
+    const fechas = Object.keys(HIST).sort().reverse();
+    if (fechas.length){
+      const keys = Object.keys(centros);
+      const h2 = [['Fecha 073'].concat(keys.map(k => centros[k] + ' t'))];
+      fechas.forEach(f => h2.push([f].concat(keys.map(k => HIST[f].g && HIST[f].g[k] ? Math.round(HIST[f].g[k].total) : ''))));
+      sections.push(['Histórico stock 073', h2]);
+    }
+    fname = 'simulador'; titulo = 'Simulador de stock';
+  } else if (MAIN === 'carga'){
     if (!DET) return toast('Sube el detalle de cartulinas primero');
     sections = [['Carga gestionada — resumen por nave (status Pendiente)', resumenG()],
                 ['Carga no gestionada — resumen por consolidador y país', resumenN()]];
