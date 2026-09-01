@@ -155,7 +155,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <p class="note">Embarques <b>pendientes</b> (sin contabilizar) donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
     <div class="tblbox"><div id="resReady"></div></div>
     <div class="secttl">🏭 Embarques gestionados con falta de producción (por fecha de corte)</div>
-    <p class="note">Pedidos con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
+    <p class="note">Pedidos <b>pendientes</b> con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
     <div class="tblbox"><div id="resFalta"></div></div>
   </section>
 
@@ -891,7 +891,7 @@ function ingestDetalle(aoa, fname){
         if (ntrV && !o.trs.includes(ntrV)) o.trs.push(ntrV);
       };
       const geV = numv(a[C.ge]), pyV = numv(a[C.py]);
-      if (geV > 0){
+      if (geV > 0 && String(a[C.st] || '').trim() === 'Pendiente'){
         const pedF = String(a[C.ped] || '');
         const f = faltaMap[pedF] || (faltaMap[pedF] = {ped: pedF, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
           nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: dstr(a[C.fcd]), ge: 0, py: 0, ents: [], trs: []});
