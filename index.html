@@ -166,7 +166,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
 
   <!-- ============ TAB SIMULADOR ============ -->
   <section id="sec_sim" style="display:none">
-    <p class="note">Stock W inicial = último 073 subido (histórico diario). Escribe las <b>UT a despachar</b> y las <b>Ton a producir</b> de cada día; Ton despachadas = UT × ton/UT despacho, y Stock W final = inicial + producidas − despachadas, encadenado día a día.</p>
+    <p class="note">Muestra <b>desde el día 1 del mes en curso</b> hasta 3 semanas adelante. Los días donde subiste el 073 quedan <b>anclados al stock real</b> (marcados <span class="pill ok">073</span>) y la cadena continúa desde ahí. Escribe la <b>producción diaria</b> (general o por día), las <b>UT</b> por día y el <b>Stock U</b> (general o por día); Despacho = UT × ton/UT, Variación = despacho − producción, Stock W Final = inicial − variación, Total = final + Stock U.</p>
     <div class="subtabs" id="simCentros"></div>
     <div class="summary" id="simIni"></div>
     <div class="tblbox"><div id="tblSim"></div></div>
@@ -1485,22 +1485,28 @@ function simDia(f, campo, v){
 function simFilas(c){
   const ini = simIniFor(c);
   const prodDef = numv((SIM.prodDef || {})[c]);
-  const stockU = numv((SIM.stockU || {})[c]);
+  const stockUDef = numv((SIM.stockU || {})[c]);
   let stock = SIM.iniOv[c] !== undefined && SIM.iniOv[c] !== '' ? numv(SIM.iniOv[c]) : ini.v;
   const filas = [];
-  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const d0 = new Date(hoy.getFullYear(), hoy.getMonth(), 1);   // siempre desde el 1 del mes en curso
+  const finD = new Date(hoy); finD.setDate(finD.getDate() + 21);
   const datos = (SIM.dias[c] || {});
-  for (let i = 0; i < 21; i++){
-    const d = new Date(d0); d.setDate(d.getDate() + i);
+  for (let d = new Date(d0); d <= finD; d.setDate(d.getDate() + 1)){
     const f = dateToISO(d);
     const dd = datos[f] || {};
+    // Dia con 073 subido: el stock inicial queda anclado al valor real del historico
+    const anclado = !!(HIST[f] && HIST[f].g && HIST[f].g[c]);
+    if (anclado) stock = HIST[f].g[c].total;
     const prod = dd.prod !== undefined ? numv(dd.prod) : prodDef;
     const ut = numv(dd.ut);
     const desp = ut * CFG.tDesp;
     const varn = desp - prod;
-    const fin = stock - varn;
-    filas.push({f, ini: stock, prod, prodMan: dd.prod !== undefined, ut, utMan: dd.ut !== undefined, desp, varn, fin, stockU, totFin: fin + stockU});
-    stock = fin;
+    const finV = stock - varn;
+    const stku = dd.stku !== undefined ? numv(dd.stku) : stockUDef;
+    filas.push({f, ini: stock, anclado, prod, prodMan: dd.prod !== undefined, ut, utMan: dd.ut !== undefined,
+      desp, varn, fin: finV, stockU: stku, stkuMan: dd.stku !== undefined, totFin: finV + stku, pasado: d < hoy, esHoy: d.getTime() === hoy.getTime()});
+    stock = finV;
   }
   return filas;
 }
@@ -1526,16 +1532,19 @@ function renderSim(){
     `<span class="prog">t/UT: ${CFG.tDesp}</span>` +
     `<button class="btn" onclick="if(confirm('¿Borrar UT, producción y ajustes del simulador de este centro?')){ delete SIM.dias[SIM.centro]; delete SIM.iniOv[SIM.centro]; if(SIM.prodDef) delete SIM.prodDef[SIM.centro]; if(SIM.stockU) delete SIM.stockU[SIM.centro]; lsSet('cruceSim', SIM); renderSim(); }">Limpiar simulador</button>`;
   const DIAS_NOM = ['dom','lun','mar','mié','jue','vie','sáb'];
-  let h = '<table style="min-width:860px"><thead><tr><th>Fecha</th><th class="num">Stock W Inicial</th><th class="num">Producción</th><th class="num">UT</th><th class="num">Despacho (ton)</th><th class="num">Variación (ton)</th><th class="num">Stock W Final</th><th class="num">Stock U</th><th class="num">Stock Total Final</th></tr></thead><tbody>';
+  let h = '<table style="min-width:920px"><thead><tr><th>Fecha</th><th class="num">Stock W Inicial</th><th class="num">Producción</th><th class="num">UT</th><th class="num">Despacho (ton)</th><th class="num">Variación (ton)</th><th class="num">Stock W Final</th><th class="num">Stock U</th><th class="num">Stock Total Final</th></tr></thead><tbody>';
   simFilas(SIM.centro).forEach(x => {
     const dnom = DIAS_NOM[isoToDate(x.f).getDay()];
     const rojo = x.ut === 0;
-    h += `<tr class="det"><td class="mono"><span class="${rojo ? 'neg' : ''}"><b>${dnom} ${fdate(x.f)}</b></span></td><td class="num">${nf0.format(x.ini)}</td>` +
+    const fechaCell = `<span class="${rojo ? 'neg' : ''} ${x.pasado ? 'cli' : ''}"><b>${dnom} ${fdate(x.f)}</b></span>` + (x.esHoy ? ' <span class="pill ok">hoy</span>' : '');
+    h += `<tr class="det" ${x.pasado ? 'style="opacity:.75"' : ''}><td class="mono">${fechaCell}</td>` +
+      `<td class="num">${x.anclado ? `<span class="pill ok" title="Stock real del 073 subido este día">073</span> <b>${nf0.format(x.ini)}</b>` : nf0.format(x.ini)}</td>` +
       `<td class="num"><input class="cell" type="number" step="1" min="0" value="${x.prodMan ? x.prod : ''}" placeholder="${prodDef ? nf0.format(prodDef) : '0'}" onchange="simDia('${x.f}','prod',this.value)"></td>` +
       `<td class="num"><input class="cell" style="width:60px" type="number" step="1" min="0" value="${x.utMan ? x.ut : ''}" onchange="simDia('${x.f}','ut',this.value)"></td>` +
-      `<td class="num">${nf0.format(x.desp)}</td><td class="num"><span class="${x.varn < 0 ? '' : ''}">${nf0.format(x.varn)}</span></td>` +
+      `<td class="num">${nf0.format(x.desp)}</td><td class="num">${nf0.format(x.varn)}</td>` +
       `<td class="num"><b class="${x.fin < 0 ? 'neg' : ''}">${nf0.format(x.fin)}</b></td>` +
-      `<td class="num">${nf0.format(x.stockU)}</td><td class="num"><b>${nf0.format(x.totFin)}</b></td></tr>`;
+      `<td class="num"><input class="cell" style="width:70px" type="number" step="1" min="0" value="${x.stkuMan ? x.stockU : ''}" placeholder="${stockU ? nf0.format(stockU) : '0'}" onchange="simDia('${x.f}','stku',this.value)" title="Stock U de este día (vacío = usar el valor general)"></td>` +
+      `<td class="num"><b>${nf0.format(x.totFin)}</b></td></tr>`;
   });
   h += '</tbody></table>';
   $('tblSim').innerHTML = h;
