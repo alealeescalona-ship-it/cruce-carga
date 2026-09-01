@@ -149,9 +149,12 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="kpis" id="resKpis"></div>
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
-    <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido, hoy o mañana)</div>
+    <div class="secttl">🚢 Naves urgentes (corte documental vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
-    <div class="secttl">🏭 Embarques gestionados con falta de producción</div>
+    <div class="secttl">⏰ Fin ready posterior al corte documental</div>
+    <p class="note">Embarques donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
+    <div class="tblbox"><div id="resReady"></div></div>
+    <div class="secttl">🏭 Embarques gestionados con falta de producción (por fecha de corte)</div>
     <p class="note">Pedidos con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
     <div class="tblbox"><div id="resFalta"></div></div>
   </section>
@@ -200,12 +203,21 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
 
   <!-- ============ TAB PRIORIDADES ============ -->
   <section id="sec_prio" style="display:none">
-    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes.</p>
-    <div class="legend">
-      <span class="pill bad">Stk Máx vencido</span>
-      <span class="pill warn">Hoy / mañana</span>
-      <span class="pill">Próximos días</span>
-      <span style="margin-left:auto"></span>
+    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = corte documental entre hoy y 3 días más; <b>VENCIDA ⛔</b> = corte ya pasado.</p>
+    <div class="filters">
+      <select id="fPCons" onchange="renderPrio()"></select>
+      <select id="fPNave" onchange="renderPrio()"></select>
+      <select id="fPUrg" onchange="renderPrio()">
+        <option value="">Urgencia: todas</option>
+        <option value="u">Solo vencidas y urgentes</option>
+      </select>
+      <select id="fPOrden" onchange="renderPrio()">
+        <option value="cons">Orden: consolidador y fecha</option>
+        <option value="fcd">Orden: fecha corte</option>
+        <option value="nave">Orden: nave</option>
+        <option value="stk">Orden: stk máximo</option>
+      </select>
+      <span style="flex:1"></span>
       <button class="btn" onclick="copyPrio()">📋 Copiar para enviar a plantas</button>
     </div>
     <div class="tblbox"><div id="tblPrio"></div></div>
@@ -857,12 +869,13 @@ function ingestDetalle(aoa, fname){
     sem: col('semana embarque'), bk: col('booking'), ges: col('gestion'),
     cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
     cCor: col('coronel'), cBod: col('stock bod nacionales'),
-    ge: col('cant entrega ton'), py: col('ton producido ov')
+    ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready')
   };
   // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
   const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const alertMap = {};
   const faltaMap = {};
+  const readyMap = {};
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r];
@@ -876,6 +889,16 @@ function ingestDetalle(aoa, fname){
         const f = faltaMap[pedF] || (faltaMap[pedF] = {ped: pedF, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
           nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: dstr(a[C.fcd]), ge: 0, py: 0});
         f.ge += geV; f.py += pyV;
+      }
+      // Fin ready posterior al corte documental (fechas de la pestaña Datos)
+      const frV = dstr(a[C.fr]), fcdV = dstr(a[C.fcd]);
+      if (frV && fcdV){
+        const pedR = String(a[C.ped] || '');
+        const rr2 = readyMap[pedR] || (readyMap[pedR] = {ped: pedR, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
+          nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: fcdV, fr: frV, ma: 0, va: 0});
+        if (fcdV < rr2.fcd) rr2.fcd = fcdV;
+        if (frV > rr2.fr) rr2.fr = frV;
+        rr2.ma += numv(a[C.ma]); rr2.va += numv(a[C.va]);
       }
     }
     // Alerta: stock repartido entre consolidadores (independiente del stock en planta)
@@ -908,8 +931,11 @@ function ingestDetalle(aoa, fname){
   alert.sort((a, b) => (a.cons + a.ped).localeCompare(b.cons + b.ped));
   const falta = Object.values(faltaMap).map(f => Object.assign(f, {falta: r3(f.ge - f.py)}))
     .filter(f => f.falta > 0.005);
-  falta.sort((a, b) => b.falta - a.falta);
-  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta};
+  falta.sort((a, b) => (a.fcd || '9999').localeCompare(b.fcd || '9999'));
+  const ready = Object.values(readyMap).filter(o => o.fr > o.fcd)
+    .map(o => Object.assign(o, {ma: r3(o.ma), va: r3(o.va), dias: Math.round((isoToDate(o.fr) - isoToDate(o.fcd)) / 86400000)}));
+  ready.sort((a, b) => a.fcd.localeCompare(b.fcd));
+  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready};
 }
 
 function ingest078(aoa, fname, nuevo){
@@ -1120,13 +1146,14 @@ function stkMax(fcdISO){
   else if (d.getDay() === 0) d.setDate(d.getDate() - 2);
   return dateToISO(d);
 }
+// Urgencia por FECHA CORTE DOCUMENTAL: vencida (<hoy), urgente (hoy a hoy+3), proxima (hoy+4/5)
 function urgency(iso){
   if (!iso) return '';
   const today = new Date(); today.setHours(0,0,0,0);
   const diff = Math.round((isoToDate(iso) - today) / 86400000);
   if (diff < 0) return 'bad';
-  if (diff <= 1) return 'warn';
-  if (diff <= 3) return 'soon';
+  if (diff <= 3) return 'warn';
+  if (diff <= 5) return 'soon';
   return '';
 }
 function plantaHasSap(pl){ return !!(SAP && SAP.byPl[pl] && Object.keys(SAP.byPl[pl]).length); }
@@ -1263,18 +1290,29 @@ function renderResumen(){
   } else {
     $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
   }
-  // Naves urgentes
+  // Naves urgentes (por fecha corte documental)
   if (DET){
-    const urg = prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)));
+    const urg = prioData().filter(x => ['bad','warn'].includes(urgency(x.fcd)));
+    urg.sort((a, b) => a.fcd.localeCompare(b.fcd));
     if (urg.length){
-      let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Stk Máximo</th><th>Corte doc.</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+      let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th>Stk Máximo</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
       urg.forEach(x => {
-        const u = urgency(x.stk);
-        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono">${fdate(x.stk)}${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.fcd)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+        const u = urgency(x.fcd);
+        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono"><b>${fdate(x.fcd)}</b>${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.stk)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
       });
       h += '</tbody></table>';
       $('resNaves').innerHTML = h;
     } else $('resNaves').innerHTML = '<div class="empty">Sin naves urgentes ✅</div>';
+    // Fin ready posterior al corte documental
+    const rdy = DET.ready || [];
+    if (rdy.length){
+      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th>Fin ready</th><th class="num">Días atraso</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+      rdy.forEach(o => {
+        h += `<tr class="det"><td class="mono">${esc(o.ped)}</td><td>${esc(o.cli)}</td><td><b>${esc(o.nave)}</b></td><td class="cli">${esc(o.cons)}</td><td class="mono">${fdate(o.fcd)}</td><td><span class="pill bad mono">${fdate(o.fr)}</span></td><td class="num"><span class="neg"><b>+${o.dias}</b></span></td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td></tr>`;
+      });
+      h += `<tr class="tot"><td colspan="9">${rdy.length} embarques con fin ready posterior al corte</td></tr></tbody></table>`;
+      $('resReady').innerHTML = h;
+    } else $('resReady').innerHTML = '<div class="empty">' + (DET.ready ? 'Sin embarques con fin ready posterior al corte ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
     const fal = (DET.falta || []).slice(0, 40);
     if (fal.length){
       let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
@@ -1288,6 +1326,7 @@ function renderResumen(){
     } else $('resFalta').innerHTML = '<div class="empty">' + (DET.falta ? 'Sin faltas de producción ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
   } else {
     $('resNaves').innerHTML = '<div class="empty">Sube el detalle de cartulinas.</div>';
+    $('resReady').innerHTML = '';
     $('resFalta').innerHTML = '';
   }
 }
@@ -1742,35 +1781,52 @@ function prioData(){
   list.sort((a, b) => (a.cons + a.fcd).localeCompare(b.cons + b.fcd));
   return list;
 }
+function prioView(){
+  let list = prioData();
+  const fc = $('fPCons').value, fn = $('fPNave').value, fu = $('fPUrg').value;
+  if (fc) list = list.filter(x => x.cons === fc);
+  if (fn) list = list.filter(x => x.nave === fn);
+  if (fu === 'u') list = list.filter(x => ['bad','warn'].includes(urgency(x.fcd)));
+  const ord = $('fPOrden').value || 'cons';
+  if (ord === 'fcd') list.sort((a, b) => (a.fcd + a.nave).localeCompare(b.fcd + b.nave));
+  else if (ord === 'nave') list.sort((a, b) => (a.nave + a.fcd).localeCompare(b.nave + b.fcd));
+  else if (ord === 'stk') list.sort((a, b) => (a.stk + a.nave).localeCompare(b.stk + b.nave));
+  else list.sort((a, b) => (a.cons + a.fcd).localeCompare(b.cons + b.fcd));
+  return {list, ord};
+}
 function renderPrio(){
-  const list = prioData();
-  if (!list.length){ $('tblPrio').innerHTML = '<div class="empty">No hay carga gestionada pendiente con stock en planta.</div>'; return; }
-  let h = '<table><thead><tr><th>Consolidador</th><th>Stk Máximo</th><th>Corte doc.</th><th>Nave</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+  const all = prioData();
+  fillSelect('fPCons', 'Consolidador: todos', [...new Set(all.map(x => x.cons))].sort());
+  fillSelect('fPNave', 'Nave: todas', [...new Set(all.map(x => x.nave))].sort());
+  const {list, ord} = prioView();
+  if (!list.length){ $('tblPrio').innerHTML = '<div class="empty">Sin naves con los filtros actuales.</div>'; return; }
+  let h = '<table><thead><tr><th>Consolidador</th><th>Corte doc.</th><th>Stk Máximo</th><th>Nave</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
   let cur = null, sm = 0, sv = 0, tm = 0, tv = 0;
-  const subtotal = () => { if (cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
+  const conSub = ord === 'cons';
+  const subtotal = () => { if (conSub && cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
   list.forEach(x => {
-    if (x.cons !== cur){ subtotal(); cur = x.cons; sm = 0; sv = 0; }
-    const u = urgency(x.stk);
+    if (conSub && x.cons !== cur){ subtotal(); cur = x.cons; sm = 0; sv = 0; }
+    const u = urgency(x.fcd);
     const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
     const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-    h += `<tr class="det"><td>${esc(x.cons)}</td><td><span class="${pill} mono">${fdate(x.stk)}${mark}</span></td><td class="mono">${fdate(x.fcd)}</td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+    h += `<tr class="det"><td>${esc(x.cons)}</td><td><span class="${pill} mono"><b>${fdate(x.fcd)}</b>${mark}</span></td><td class="mono">${fdate(x.stk)}</td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
     sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
   });
   subtotal();
-  h += `<tr class="tot"><td colspan="4">Total general</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td></tr>`;
+  h += `<tr class="tot"><td colspan="4">Total general (${list.length} naves)</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td></tr>`;
   h += '</tbody></table>';
   $('tblPrio').innerHTML = h;
 }
 function copyPrio(){
-  const list = prioData();
+  const {list} = prioView();
   let cur = null;
   const lines = ['PRIORIDADES NAVES — corte detalle ' + (DET ? fdate(DET.corte) : '')];
   list.forEach(x => {
     if (x.cons !== cur){ cur = x.cons; lines.push('', cur + ':'); }
-    const u = urgency(x.stk);
-    const mark = u === 'bad' ? ' [VENCIDO]' : (u === 'warn' ? ' [URGENTE]' : '');
+    const u = urgency(x.fcd);
+    const mark = u === 'bad' ? ' [VENCIDA]' : (u === 'warn' ? ' [URGENTE]' : '');
     const tons = (x.ma > 0 ? fmt(x.ma) + ' t Maule' : '') + (x.ma > 0 && x.va > 0 ? ' + ' : '') + (x.va > 0 ? fmt(x.va) + ' t Valdivia' : '');
-    lines.push(`  ${x.nave} — stk máximo ${fdate(x.stk)} (corte doc ${fdate(x.fcd)}) — ${tons}${mark}`);
+    lines.push(`  ${x.nave} — corte doc ${fdate(x.fcd)} (stk máximo ${fdate(x.stk)}) — ${tons}${mark}`);
   });
   const txt = lines.join('\n');
   const done = () => toast('Prioridades copiadas al portapapeles');
@@ -1924,7 +1980,7 @@ function prioAoa(){
   const pSub = () => { if (pCur !== null) prio.push(['Total ' + pCur, '', '', '', '', r3(pMa), r3(pVa)]); };
   prioData().forEach(x => {
     if (x.cons !== pCur){ pSub(); pCur = x.cons; pMa = 0; pVa = 0; }
-    prio.push([x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
+    prio.push([x.cons, x.stk, alertaTxt(urgency(x.fcd)), x.fcd, x.nave, r3(x.ma), r3(x.va)]);
     pMa += x.ma; pVa += x.va; pTm += x.ma; pTv += x.va;
   });
   pSub();
@@ -2030,6 +2086,8 @@ function buildExport(){
     out['Prioridades'] = prioAoa();
     const fa = faltaAoa();
     if (fa.length > 1) out['Falta produccion'] = fa;
+    const ry = readyAoa();
+    if (ry.length > 1) out['Ready vs corte'] = ry;
   }
   if (DET && DET.alert && DET.alert.length){
     const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
@@ -2170,9 +2228,13 @@ function faltaAoa(){
     .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
 }
 function urgAoa(){
-  return [['Nave','Consolidador','Stk Maximo','Alerta','F corte doc','Maule t','Valdivia t']]
-    .concat(prioData().filter(x => ['bad','warn'].includes(urgency(x.stk)))
-      .map(x => [x.nave, x.cons, x.stk, alertaTxt(urgency(x.stk)), x.fcd, r3(x.ma), r3(x.va)]));
+  return [['Nave','Consolidador','F corte doc','Alerta','Stk Maximo','Maule t','Valdivia t']]
+    .concat(prioData().filter(x => ['bad','warn'].includes(urgency(x.fcd)))
+      .map(x => [x.nave, x.cons, x.fcd, alertaTxt(urgency(x.fcd)), x.stk, r3(x.ma), r3(x.va)]));
+}
+function readyAoa(){
+  return [['Pedido','Cliente','Nave','Consolidador','F corte doc','F fin ready','Dias atraso','Maule t','Valdivia t']]
+    .concat((DET.ready || []).map(o => [o.ped, o.cli, o.nave, o.cons, o.fcd, o.fr, o.dias, o.ma, o.va]));
 }
 function exportPDF(){
   let sections = [], fname = 'cruce', titulo = '';
@@ -2181,9 +2243,11 @@ function exportPDF(){
     if (STK) sections.push(['Stock por grupo (073)', resumenStockAoa()]);
     if (DET){
       const u = urgAoa();
-      if (u.length > 1) sections.push(['Naves urgentes', u]);
+      if (u.length > 1) sections.push(['Naves urgentes (corte documental)', u]);
+      const rdy = readyAoa();
+      if (rdy.length > 1) sections.push(['Fin ready posterior al corte documental', rdy]);
       const f = faltaAoa();
-      if (f.length > 1) sections.push(['Embarques gestionados con falta de producción', f]);
+      if (f.length > 1) sections.push(['Embarques gestionados con falta de producción (por fecha de corte)', f]);
     }
     if (!sections.length) return toast('Aún no hay datos cargados');
     fname = 'resumen'; titulo = 'Resumen ejecutivo';
