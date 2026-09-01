@@ -152,7 +152,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="secttl">🚢 Naves urgentes (corte documental vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
-    <p class="note">Embarques donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
+    <p class="note">Embarques <b>pendientes</b> (sin contabilizar) donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
     <div class="tblbox"><div id="resReady"></div></div>
     <div class="secttl">🏭 Embarques gestionados con falta de producción (por fecha de corte)</div>
     <p class="note">Pedidos con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
@@ -898,9 +898,9 @@ function ingestDetalle(aoa, fname){
         f.ge += geV; f.py += pyV;
         addRef(f);
       }
-      // Fin ready posterior al corte documental (fechas de la pestaña Datos)
+      // Fin ready posterior al corte documental (fechas de la pestaña Datos; solo status SM Pendiente)
       const frV = dstr(a[C.fr]), fcdV = dstr(a[C.fcd]);
-      if (frV && fcdV){
+      if (frV && fcdV && String(a[C.st] || '').trim() === 'Pendiente'){
         const pedR = String(a[C.ped] || '');
         const rr2 = readyMap[pedR] || (readyMap[pedR] = {ped: pedR, cli: String(a[C.cli] || ''), paisd: String(a[C.paisd] || ''),
           nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), fcd: fcdV, fr: frV, ma: 0, va: 0, ents: [], trs: []});
