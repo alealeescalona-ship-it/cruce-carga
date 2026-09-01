@@ -149,6 +149,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="kpis" id="resKpis"></div>
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
+    <div class="secttl">Stock 073 por año del pedido</div>
+    <div class="tblbox"><div id="resAnio"></div></div>
     <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
@@ -175,6 +177,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <button class="subtab active" id="tabG" onclick="setTab('G')">✅ Gestionada (nave asignada)</button>
       <button class="subtab warn" id="tabN" onclick="setTab('N')">⚠️ No gestionada (embarque teórico)</button>
       <button class="subtab warn" id="tabA" onclick="setTab('A')">🚨 Stock repartido</button>
+      <button class="subtab" id="tabS" onclick="setTab('S')">💰 Saldos contabilizados</button>
     </div>
     <div class="filters" id="cargaFilters">
       <input type="text" id="q" placeholder="Buscar pedido, cliente, producto, nave…" oninput="render()">
@@ -239,8 +242,12 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
   <section id="sec_stock" style="display:none">
     <p class="note" id="stockNote"></p>
     <div class="subtabs" id="stkCentros"></div>
+    <div class="kpis" id="stkKpis"></div>
     <div class="secttl">Stock W en <span id="stkCentroNom"></span></div>
     <div class="tblbox"><div id="tblStock"></div></div>
+    <div class="secttl">📅 Antigüedad del stock por pedido (año / mes del número OE)</div>
+    <p class="note">Mes y año tomados del número de pedido (OE0 + mes + año). Incluye la regla: embarque con Fecha Staking anterior al mes en curso cuenta como Sin Entrega.</p>
+    <div class="tblbox"><div id="tblAging"></div></div>
     <div class="secttl">Semielaborado redirigido (pedidos SEMI sin embarque)</div>
     <div class="tblbox"><div id="tblSemi"></div></div>
     <div class="secttl">Almacén P09</div>
@@ -870,13 +877,15 @@ function ingestDetalle(aoa, fname){
     cSai: col('dyc sai'), cPcv: col('pto columbo vap'),
     cCor: col('coronel'), cBod: col('stock bod nacionales'),
     ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready'),
-    ent2: col('entrega'), ntr: col('n transporte')
+    ent2: col('entrega'), ntr: col('n transporte'), fzr: col('fecha zarpe real')
   };
   // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
   const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const alertMap = {};
   const faltaMap = {};
   const readyMap = {};
+  const saldoRows = [];
+  const UBIC_COLS = [['ma','MAULE (planta)'], ['va','VALDIVIA (planta)'], ['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r];
@@ -920,6 +929,17 @@ function ingestDetalle(aoa, fname){
         s: {}});
       CONS_COLS.forEach(([k, lbl]) => { if (C[k] >= 0){ const v = numv(a[C[k]]); if (v > 0) o.s[lbl] = r3((o.s[lbl] || 0) + v); } });
     }
+    // Saldos de embarques contabilizados: quedo stock en planta o consolidador tras el zarpe real
+    if (String(a[C.st] || '').trim() === 'Contabilizado' && String(a[C.et] || '').trim() !== 'SI'){
+      const fzrV = dstr(a[C.fzr]);
+      if (fzrV){
+        UBIC_COLS.forEach(([k, lbl]) => {
+          const v = C[k] >= 0 ? numv(a[C[k]]) : 0;
+          if (v > 0) saldoRows.push({fzr: fzrV, ped: String(a[C.ped] || ''), cli: String(a[C.cli] || ''),
+            nave: String(a[C.nave] || ''), cons: String(a[C.cons] || ''), ub: lbl, t: v});
+        });
+      }
+    }
     if (ma <= 0 && va <= 0) continue;
     rows.push({
       grp: String(a[C.et] || '').trim() === 'SI' ? 'N' : 'G',
@@ -944,7 +964,25 @@ function ingestDetalle(aoa, fname){
   const ready = Object.values(readyMap).filter(o => o.fr > o.fcd)
     .map(o => Object.assign(o, {ma: r3(o.ma), va: r3(o.va), dias: Math.round((isoToDate(o.fr) - isoToDate(o.fcd)) / 86400000)}));
   ready.sort((a, b) => a.fcd.localeCompare(b.fcd));
-  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready};
+  // Agregar saldos por semana (martes a lunes) x consolidador x nave x ubicacion
+  const salMap = {};
+  saldoRows.forEach(s => {
+    const w = semanaMartes(s.fzr);
+    const k = w.key + '||' + s.cons + '||' + s.nave + '||' + s.ub;
+    const o = salMap[k] || (salMap[k] = {sem: w.key, semLbl: w.lbl, cons: s.cons, nave: s.nave, ub: s.ub, t: 0, peds: []});
+    o.t += s.t;
+    if (!o.peds.includes(s.ped)) o.peds.push(s.ped);
+  });
+  const saldos = Object.values(salMap).map(o => Object.assign(o, {t: r3(o.t)}));
+  saldos.sort((a, b) => (a.sem + a.cons + a.nave).localeCompare(b.sem + b.cons + b.nave));
+  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready, saldos: saldos};
+}
+// Semana martes a lunes: devuelve el martes de inicio como clave
+function semanaMartes(iso){
+  const d = isoToDate(iso);
+  d.setDate(d.getDate() - ((d.getDay() - 2 + 7) % 7));
+  const fin = new Date(d); fin.setDate(fin.getDate() + 6);
+  return {key: dateToISO(d), lbl: fdate(dateToISO(d)) + ' al ' + fdate(dateToISO(fin))};
 }
 
 function ingest078(aoa, fname, nuevo){
@@ -1033,7 +1071,7 @@ function ingest073(aoa, fname){
     ent: col('entrega'), fent: col('fecha de entrega'), transp: col('transporte'),
     nave: col('nave'), bk: col('booking'), centro: col('centro'), dcentro: col('denom. centro'),
     alm: col('almacen'), blq: col('motivo bloqueo transporte'), dest: col('nombre destinatario'),
-    oc: heads.findIndex(h => h.includes('ped clte'))
+    oc: heads.findIndex(h => h.includes('ped clte')), fstk: col('fecha staking')
   };
   const rows = [];
   const centros = {};
@@ -1048,6 +1086,7 @@ function ingest073(aoa, fname){
       centro, pais: txt(C.pais).toUpperCase(), cli: txt(C.cli), dest: txt(C.dest),
       ped: txt(C.ped), oc: txt(C.oc), alm: txt(C.alm).toUpperCase(), libre: r3(libre),
       ent: txt(C.ent), fent: a[C.fent] != null && a[C.fent] !== '' ? dstr(a[C.fent]) : '',
+      fstk: a[C.fstk] != null && a[C.fstk] !== '' ? dstr(a[C.fstk]) : '',
       transp: txt(C.transp), nave: txt(C.nave), bk: txt(C.bk), blq: txt(C.blq).toUpperCase()
     });
   }
@@ -1076,11 +1115,63 @@ function stkGrupo(r){
   if (PAISES_TI.includes(r.pais)) return {g: 'INT'};
   return {g: 'MAR'};
 }
+function mesActualISO(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01'; }
 function stkEstado(r){
   if (r.blq === 'C1' || r.blq === 'C2') return 'BLOQ';
-  if (r.transp || r.nave || r.bk) return 'GEST';
+  if (r.transp || r.nave || r.bk){
+    // Embarque con Fecha Staking anterior al mes en curso -> se considera SIN ENTREGA
+    if (r.fstk && r.fstk < mesActualISO()) return 'SINE';
+    return 'GEST';
+  }
   if (r.ent && r.fent) return 'PORG';
   return 'SINE';
+}
+// Año/mes desde el numero de pedido: OE0 + MM + A (OE0086... = agosto 2026)
+const MES_NOM = ['','ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function pedYM(ped){
+  const m = String(ped || '').toUpperCase().match(/^OE0(\d{2})(\d)/);
+  if (!m) return null;
+  const mes = +m[1];
+  let anio = 2020 + (+m[2]);
+  if (anio > new Date().getFullYear() + 1) anio -= 10;   // digito ambiguo: 9 = 2019, no 2029
+  if (mes < 1 || mes > 12) return null;
+  return {key: anio + '-' + String(mes).padStart(2, '0'), lbl: MES_NOM[mes] + ' ' + anio, anio};
+}
+function stkAging(centro){
+  const map = {};
+  STK.rows.filter(r => r.centro === centro && (r.alm === '002' || r.alm === '2') && !esSemi(r)).forEach(r => {
+    const ym = pedYM(r.ped);
+    const k = ym ? ym.key : '0000';
+    const o = map[k] || (map[k] = {key: k, lbl: ym ? ym.lbl : 'sin código', bloq: 0, porg: 0, sine: 0, tot: 0});
+    o.tot += r.libre;
+    const {g} = stkGrupo(r);
+    if (g === 'MAR' || g === 'INT'){
+      const e = stkEstado(r);
+      if (e === 'BLOQ') o.bloq += r.libre;
+      else if (e === 'PORG') o.porg += r.libre;
+      else if (e === 'SINE') o.sine += r.libre;
+    }
+  });
+  return Object.values(map).sort((a, b) => a.key.localeCompare(b.key));
+}
+function agingAnual(){
+  const map = {};
+  STK.rows.forEach(r => {
+    const ym = pedYM(r.ped);
+    const k = ym ? String(ym.anio) : 'sin código';
+    const o = map[k] || (map[k] = {anio: k, bloq: 0, porg: 0, sine: 0, tot: 0});
+    o.tot += r.libre;
+    if ((r.alm === '002' || r.alm === '2') && !esSemi(r)){
+      const {g} = stkGrupo(r);
+      if (g === 'MAR' || g === 'INT'){
+        const e = stkEstado(r);
+        if (e === 'BLOQ') o.bloq += r.libre;
+        else if (e === 'PORG') o.porg += r.libre;
+        else if (e === 'SINE') o.sine += r.libre;
+      }
+    }
+  });
+  return Object.values(map).sort((a, b) => a.anio.localeCompare(b.anio));
 }
 // SEMI en N° ped clte sin embarque ni fecha de entrega -> semielaborado redirigido
 function esSemi(r){ return /SEMI/i.test(r.oc || '') && !r.transp && !r.nave && !r.bk && !(r.ent && r.fent); }
@@ -1296,8 +1387,21 @@ function renderResumen(){
     h += `<tr class="tot"><td>Total</td>` + centros.map(c => { const s = Object.values(G[c]).reduce((a, b) => a + b, 0); tt += s; return `<td class="num">${nf0.format(s)}</td>`; }).join('') + (centros.length > 1 ? `<td class="num">${nf0.format(tt)}</td>` : '') + '</tr>';
     h += '</tbody></table>';
     $('resStock').innerHTML = h;
+    // Por año del pedido
+    const aa = agingAnual();
+    let ha = '<table style="min-width:520px"><thead><tr><th>Año pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Stock total año</th></tr></thead><tbody>';
+    let aTb = 0, aTp = 0, aTs = 0, aTt = 0;
+    const anioAct = String(new Date().getFullYear());
+    aa.forEach(o => {
+      aTb += o.bloq; aTp += o.porg; aTs += o.sine; aTt += o.tot;
+      const viejo = o.anio !== 'sin código' && o.anio < anioAct;
+      ha += `<tr class="det"><td>${viejo ? `<span class="pill bad"><b>${esc(o.anio)}</b></span>` : `<b>${esc(o.anio)}</b>`}</td><td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td><td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
+    });
+    ha += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(aTb)}</td><td class="num">${nf0.format(aTp)}</td><td class="num">${nf0.format(aTs)}</td><td class="num">${nf0.format(aTt)}</td></tr></tbody></table>`;
+    $('resAnio').innerHTML = ha;
   } else {
     $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
+    $('resAnio').innerHTML = '';
   }
   // Naves urgentes (por fecha corte documental)
   if (DET){
@@ -1532,8 +1636,9 @@ function renderStock(){
   if (!STK){
     $('stockNote').textContent = '';
     $('stkCentros').innerHTML = '';
+    $('stkKpis').innerHTML = '';
     $('tblStock').innerHTML = '<div class="empty">Sube el archivo 073 (stock en planta y consolidadores) para ver este análisis.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
-    $('tblP09').innerHTML = ''; $('tblSemi').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
+    $('tblAging').innerHTML = ''; $('tblP09').innerHTML = ''; $('tblSemi').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
     $('stkCentroNom').textContent = '';
     return;
   }
@@ -1543,6 +1648,33 @@ function renderStock(){
   $('stkCentros').innerHTML = '<span style="font-weight:700">Centro:</span> ' + centros.map(c =>
     `<button class="subtab ${c === STKC ? 'active' : ''}" onclick="setStkCentro('${esc(c)}')">${esc(STK.centros[c])} <span class="cli mono">${esc(c)}</span></button>`).join('');
   $('stkCentroNom').textContent = STK.centros[STKC] + ' (' + STKC + ')';
+  // KPIs ejecutivos del centro
+  const SS = stkCalc(STKC);
+  const nog = SS.porgM + SS.porgI + SS.sineM + SS.sineI;
+  const pctK = v => SS.total ? Math.round(v / SS.total * 100) + '%' : '—';
+  $('stkKpis').innerHTML =
+    `<div class="kpi"><div class="lbl">Stock Total</div><div class="val">${nf0.format(SS.total)} t</div><div class="det">${esc(STK.centros[STKC])}</div></div>` +
+    `<div class="kpi n"><div class="lbl">No Gestionado</div><div class="val">${nf0.format(nog)} t</div><div class="det">${pctK(nog)} del total</div></div>` +
+    `<div class="kpi g"><div class="lbl">Gestionado</div><div class="val">${nf0.format(SS.gestM + SS.gestI)} t</div><div class="det">${pctK(SS.gestM + SS.gestI)} del total</div></div>` +
+    `<div class="kpi n"><div class="lbl">Bloqueo de crédito</div><div class="val">${nf0.format(SS.bloqM + SS.bloqI)} t</div><div class="det">${pctK(SS.bloqM + SS.bloqI)} del total</div></div>` +
+    `<div class="kpi"><div class="lbl">Semielaborado + P09</div><div class="val">${nf0.format(SS.semi002 + SS.p09)} t</div><div class="det">${pctK(SS.semi002 + SS.p09)} del total</div></div>`;
+  // Antiguedad por año/mes del pedido
+  const ag = stkAging(STKC);
+  if (ag.length){
+    const anioAct = new Date().getFullYear();
+    let ha = '<table style="min-width:560px"><thead><tr><th>Año / Mes pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Total mes</th></tr></thead><tbody>';
+    let tb = 0, tpq = 0, ts = 0, tt = 0;
+    ag.forEach(o => {
+      tb += o.bloq; tpq += o.porg; ts += o.sine; tt += o.tot;
+      const viejo = o.key !== '0000' && +o.key.slice(0, 4) < anioAct;
+      ha += `<tr class="det"><td>${viejo ? `<span class="pill bad"><b>${esc(o.lbl)}</b></span>` : `<b>${esc(o.lbl)}</b>`}</td>` +
+        `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
+        `<td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
+    });
+    ha += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(tb)}</td><td class="num">${nf0.format(tpq)}</td><td class="num">${nf0.format(ts)}</td><td class="num">${nf0.format(tt)}</td></tr>`;
+    ha += '</tbody></table>';
+    $('tblAging').innerHTML = ha;
+  } else $('tblAging').innerHTML = '<div class="empty">Sin datos de almacén 002 en este centro.</div>';
   const filas = stkResumen(STKC);
   let h = '<table style="min-width:520px"><thead><tr><th>Categoría</th><th class="num">Tons</th><th class="num">%Parcial</th><th class="num">%Total</th></tr></thead><tbody>';
   filas.forEach(f => {
@@ -1561,15 +1693,21 @@ function renderStock(){
   const tablaAparte = (cat, targetId, totalLbl, vacio) => {
     const rws = stkRowsDet(STKC, cat);
     if (!rws.length){ $(targetId).innerHTML = `<div class="empty">${vacio}</div>`; return; }
-    let h2 = '<table><thead><tr><th>Centro</th><th>País</th><th>Destinatario</th><th>Pedido</th><th class="num">Libre utiliz. t</th></tr></thead><tbody>';
+    let h2 = '<table><thead><tr><th>Centro</th><th>País</th><th>Destinatario</th><th>Pedido</th><th>Nave</th><th>Fecha stk</th><th class="num">Libre utiliz. t</th></tr></thead><tbody>';
     let t = 0;
     const agg = {};
-    rws.forEach(r => { const k = r.pais + '||' + (r.dest || r.cli) + '||' + r.ped; const o = agg[k] || (agg[k] = {pais: r.pais, dest: r.dest || r.cli, ped: r.ped, libre: 0}); o.libre += r.libre; });
+    rws.forEach(r => {
+      const k = r.pais + '||' + (r.dest || r.cli) + '||' + r.ped;
+      const o = agg[k] || (agg[k] = {pais: r.pais, dest: r.dest || r.cli, ped: r.ped, libre: 0, naves: [], fstk: ''});
+      o.libre += r.libre;
+      if (r.nave && !o.naves.includes(r.nave)) o.naves.push(r.nave);
+      if (r.fstk && (!o.fstk || r.fstk < o.fstk)) o.fstk = r.fstk;
+    });
     Object.values(agg).sort((a, b) => b.libre - a.libre).forEach(o => {
       t += o.libre;
-      h2 += `<tr class="det"><td>${esc(STK.centros[STKC])}</td><td>${esc(o.pais)}</td><td>${esc(o.dest)}</td><td class="mono">${esc(o.ped) || '<span class="cli">sin pedido</span>'}</td><td class="num">${fmt(o.libre)}</td></tr>`;
+      h2 += `<tr class="det"><td>${esc(STK.centros[STKC])}</td><td>${esc(o.pais)}</td><td>${esc(o.dest)}</td><td class="mono">${esc(o.ped) || '<span class="cli">sin pedido</span>'}</td><td class="cli">${o.naves.length ? esc(o.naves.join(', ')) : '—'}</td><td class="mono">${o.fstk ? fdate(o.fstk) : '—'}</td><td class="num">${fmt(o.libre)}</td></tr>`;
     });
-    h2 += `<tr class="tot"><td colspan="4">${totalLbl}</td><td class="num">${fmt(t)}</td></tr></tbody></table>`;
+    h2 += `<tr class="tot"><td colspan="6">${totalLbl}</td><td class="num">${fmt(t)}</td></tr></tbody></table>`;
     $(targetId).innerHTML = h2;
   };
   tablaAparte('SEMI', 'tblSemi', 'Total semielaborado redirigido', 'Sin pedidos SEMI sin embarque en este centro.');
@@ -1660,11 +1798,61 @@ function setTab(t){
   $('tabG').classList.toggle('active', t === 'G');
   $('tabN').classList.toggle('active', t === 'N');
   $('tabA').classList.toggle('active', t === 'A');
-  $('cargaFilters').style.display = t === 'A' ? 'none' : '';
+  $('tabS').classList.toggle('active', t === 'S');
+  $('cargaFilters').style.display = (t === 'A' || t === 'S') ? 'none' : '';
   $('btnSel').style.display = t === 'N' ? '' : 'none';
   if (t === 'A'){ renderAlert(); return; }
+  if (t === 'S'){ renderSaldos(); return; }
   refreshSelects();
   render();
+}
+// ================== SALDOS CONTABILIZADOS ==================
+const SALF = {sem: '', cons: '', nave: '', ub: '', ord: 'sem'};
+function salSet(campo, v){ SALF[campo] = v; renderSaldos(); }
+function renderSaldos(){
+  const all = (DET && DET.saldos) || [];
+  const opt = (vals, cur, lbl) => `<option value="">${lbl}</option>` + vals.map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(v)}</option>`).join('');
+  const semanas = [...new Set(all.map(s => s.sem))].sort();
+  const semLbl = {};
+  all.forEach(s => semLbl[s.sem] = s.semLbl);
+  let list = all.filter(s => (!SALF.sem || s.sem === SALF.sem) && (!SALF.cons || s.cons === SALF.cons) && (!SALF.nave || s.nave === SALF.nave) && (!SALF.ub || s.ub === SALF.ub));
+  if (SALF.ord === 'saldo') list = list.slice().sort((a, b) => b.t - a.t);
+  else if (SALF.ord === 'nave') list = list.slice().sort((a, b) => (a.nave + a.sem).localeCompare(b.nave + b.sem));
+  else if (SALF.ord === 'cons') list = list.slice().sort((a, b) => (a.cons + a.sem + a.nave).localeCompare(b.cons + b.sem + b.nave));
+  else if (SALF.ord === 'ub') list = list.slice().sort((a, b) => (a.ub + a.sem).localeCompare(b.ub + b.sem));
+  let tt = 0;
+  list.forEach(s => tt += s.t);
+  const naves = [...new Set(all.map(s => s.nave))].sort();
+  const conss = [...new Set(all.map(s => s.cons))].sort();
+  const ubs = [...new Set(all.map(s => s.ub))].sort();
+  $('summary').innerHTML =
+    `<span>Saldos de embarques <b>contabilizados</b> (zarpe real, semana martes a lunes): <b>${list.length}</b> líneas</span>` +
+    `<span>Total saldo: <b>${fmt(tt)} t</b></span>` +
+    (!DET || !DET.saldos ? '<span class="prog">— vuelve a subir el detalle para calcular esto</span>' : '');
+  let h = '<div class="filters" style="padding:10px 10px 0">' +
+    `<select class="btn" onchange="salSet('sem', this.value)"><option value="">Semana: todas</option>${semanas.map(sk => `<option value="${esc(sk)}" ${sk === SALF.sem ? 'selected' : ''}>${esc(semLbl[sk] || sk)}</option>`).join('')}</select>` +
+    `<select class="btn" onchange="salSet('cons', this.value)">${opt(conss, SALF.cons, 'Consolidador: todos')}</select>` +
+    `<select class="btn" onchange="salSet('nave', this.value)">${opt(naves, SALF.nave, 'Nave: todas')}</select>` +
+    `<select class="btn" onchange="salSet('ub', this.value)">${opt(ubs, SALF.ub, 'Ubicación: todas')}</select>` +
+    `<select class="btn" onchange="salSet('ord', this.value)"><option value="sem" ${SALF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="cons" ${SALF.ord === 'cons' ? 'selected' : ''}>Orden: consolidador</option><option value="nave" ${SALF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option><option value="ub" ${SALF.ord === 'ub' ? 'selected' : ''}>Orden: ubicación</option><option value="saldo" ${SALF.ord === 'saldo' ? 'selected' : ''}>Orden: mayor saldo</option></select>` +
+    '</div>';
+  if (!list.length){
+    $('tbl').innerHTML = h + '<div class="empty">Sin saldos con los filtros actuales ✅</div>';
+    return;
+  }
+  h += '<table><thead><tr><th>Semana (mar–lun)</th><th>Consolidador</th><th>Nave</th><th>Ubicación del saldo</th><th class="num">Saldo t</th><th class="num">Pedidos</th></tr></thead><tbody>';
+  let cur = null, st2 = 0;
+  const conSub = SALF.ord === 'sem';
+  const sub = () => { if (conSub && cur !== null) h += `<tr class="tot"><td colspan="4">Total semana ${esc(semLbl[cur] || cur)}</td><td class="num">${fmt(st2)}</td><td></td></tr>`; };
+  list.forEach(s => {
+    if (conSub && s.sem !== cur){ sub(); cur = s.sem; st2 = 0; }
+    st2 += s.t;
+    const esPlanta = s.ub.includes('planta');
+    h += `<tr class="det" title="${esc(s.peds.join(', '))}"><td class="mono">${esc(s.semLbl)}</td><td>${esc(s.cons)}</td><td><b>${esc(s.nave)}</b></td><td><span class="pill ${esPlanta ? 'bad' : 'warn'}">${esc(s.ub)}</span></td><td class="num"><b>${fmt(s.t)}</b></td><td class="num">${s.peds.length}</td></tr>`;
+  });
+  sub();
+  h += `<tr class="tot"><td colspan="4">Total general</td><td class="num">${fmt(tt)}</td><td></td></tr></tbody></table>`;
+  $('tbl').innerHTML = h;
 }
 const CONS_MATCH = {'DYC SAI': ['sai'], 'PC VALP': ['columbo','valpara'], 'CORONEL': ['coronel'], 'BOD. NACIONAL': ['bodega','nacional']};
 function renderAlert(){
@@ -2110,6 +2298,10 @@ function buildExport(){
     if (fa.length > 1) out['Falta produccion'] = fa;
     const ry = readyAoa();
     if (ry.length > 1) out['Ready vs corte'] = ry;
+    if (DET.saldos && DET.saldos.length){
+      out['Saldos contabilizados'] = [['Semana (mar-lun)','Consolidador','Nave','Ubicacion','Saldo t','Pedidos']]
+        .concat(DET.saldos.map(s => [s.semLbl, s.cons, s.nave, s.ub, s.t, s.peds.join(', ')]));
+    }
   }
   if (DET && DET.alert && DET.alert.length){
     const CONS_LBL = ['DYC SAI','PC VALP','CORONEL','BOD. NACIONAL'];
@@ -2124,12 +2316,14 @@ function buildExport(){
       stkResumen(c).forEach(f => res.push([STK.centros[c], (f.tipo === 'sub' ? '    ' : '') + f.lbl, Math.round(f.t), f.pPar || '', f.pTot || '']));
     });
     out['Stock 073'] = res;
+    Object.keys(STK.centros).forEach(c => { out[('Antiguedad ' + STK.centros[c]).slice(0, 31)] = agingAoa(c); });
+    out['Stock por año'] = agingAnualAoa();
     const mkAparte = cat => {
-      const aoa = [['Centro','Pais','Destinatario','Pedido','Libre t']];
+      const aoa = [['Centro','Pais','Destinatario','Pedido','Nave','Fecha stk','Libre t']];
       Object.keys(STK.centros).forEach(c => {
         let t = 0;
-        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; });
-        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
+        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r.nave || '', r.fstk || '', r3(r.libre)]); t += r.libre; });
+        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', '', '', r3(t)]);
       });
       return aoa;
     };
@@ -2232,6 +2426,20 @@ async function exportSeleccion(){
   const buf = await wb.xlsx.writeBuffer();
   saveFile('no_gestionada_seleccion_' + DET.corte + '.xlsx', buf);
 }
+function agingAoa(centro){
+  const aoa = [['Año/Mes pedido','Bloqueo credito','Por gestionar','Sin entrega','Total mes']];
+  let tb = 0, tp = 0, ts = 0, tt = 0;
+  stkAging(centro).forEach(o => { tb += o.bloq; tp += o.porg; ts += o.sine; tt += o.tot; aoa.push([o.lbl, Math.round(o.bloq), Math.round(o.porg), Math.round(o.sine), Math.round(o.tot)]); });
+  aoa.push(['Total', Math.round(tb), Math.round(tp), Math.round(ts), Math.round(tt)]);
+  return aoa;
+}
+function agingAnualAoa(){
+  const aoa = [['Año pedido','Bloqueo credito','Por gestionar','Sin entrega','Stock total año']];
+  let tb = 0, tp = 0, ts = 0, tt = 0;
+  agingAnual().forEach(o => { tb += o.bloq; tp += o.porg; ts += o.sine; tt += o.tot; aoa.push([o.anio, Math.round(o.bloq), Math.round(o.porg), Math.round(o.sine), Math.round(o.tot)]); });
+  aoa.push(['Total', Math.round(tb), Math.round(tp), Math.round(ts), Math.round(tt)]);
+  return aoa;
+}
 function resumenStockAoa(){
   const centros = Object.keys(STK.centros);
   const aoa = [['Grupo'].concat(centros.map(c => STK.centros[c]))];
@@ -2262,7 +2470,10 @@ function exportPDF(){
   let sections = [], fname = 'cruce', titulo = '';
   if (MAIN === 'resumen'){
     sections = [];
-    if (STK) sections.push(['Stock por grupo (073)', resumenStockAoa()]);
+    if (STK){
+      sections.push(['Stock por grupo (073)', resumenStockAoa()]);
+      sections.push(['Stock 073 por año del pedido', agingAnualAoa()]);
+    }
     if (DET){
       const u = urgAoa();
       if (u.length > 1) sections.push(['Naves urgentes (corte documental)', u]);
@@ -2292,6 +2503,10 @@ function exportPDF(){
     if (!DET) return toast('Sube el detalle de cartulinas primero');
     sections = [['Carga gestionada — resumen por nave (status Pendiente)', resumenG()],
                 ['Carga no gestionada — resumen por consolidador y país', resumenN()]];
+    if (DET.saldos && DET.saldos.length){
+      sections.push(['Saldos de embarques contabilizados (semana martes a lunes por zarpe real)',
+        [['Semana','Consolidador','Nave','Ubicación','Saldo t']].concat(DET.saldos.map(s => [s.semLbl, s.cons, s.nave, s.ub, s.t]))]);
+    }
     fname = 'carga'; titulo = 'Carga marítima con stock en planta';
   } else if (MAIN === 'prio'){
     if (!DET) return toast('Sube el detalle de cartulinas primero');
@@ -2307,17 +2522,19 @@ function exportPDF(){
     fname = 'transporte'; titulo = 'Programa de transporte';
   } else if (MAIN === 'stock'){
     if (!STK) return toast('Sube el archivo 073 primero');
-    sections = Object.keys(STK.centros).map(c => {
+    sections = [];
+    Object.keys(STK.centros).forEach(c => {
       const aoa = [['Categoría','Tons','%Parcial','%Total']];
       stkResumen(c).forEach(f => aoa.push([(f.tipo === 'sub' ? '    ' : '') + f.lbl, Math.round(f.t), f.pPar || '', f.pTot || '']));
-      return ['Stock W en ' + STK.centros[c] + ' (' + c + ')', aoa];
+      sections.push(['Stock W en ' + STK.centros[c] + ' (' + c + ')', aoa]);
+      sections.push(['Antigüedad por pedido — ' + STK.centros[c], agingAoa(c)]);
     });
     const mkAp = cat => {
-      const aoa = [['Centro','País','Destinatario','Pedido','Libre t']];
+      const aoa = [['Centro','País','Destinatario','Pedido','Nave','Fecha stk','Libre t']];
       Object.keys(STK.centros).forEach(c => {
         let t = 0;
-        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r3(r.libre)]); t += r.libre; });
-        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', r3(t)]);
+        stkRowsDet(c, cat).forEach(r => { aoa.push([STK.centros[c], r.pais, r.dest || r.cli, r.ped, r.nave || '', r.fstk || '', r3(r.libre)]); t += r.libre; });
+        if (t) aoa.push(['Total ' + STK.centros[c], '', '', '', '', '', r3(t)]);
       });
       return aoa;
     };
