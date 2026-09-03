@@ -1284,11 +1284,13 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
     if (!CENTROS_SALDO.includes(ce)) continue;
     const ped = String(a[B.ped] || '').trim();
     if (!ped) continue;
+    const libreV = numv(a[B.libre]);
+    if (libreV <= 0) continue;   // solo lotes CON stock libre cuentan
     const o = basePed[ped] || (basePed[ped] = {lotes: 0, libre: 0, byCentro: {}, byCentroLotes: {}, embd: ''});
     o.lotes++;
-    o.libre += numv(a[B.libre]);
+    o.libre += libreV;
     const cn = CENTRO_NOM[ce] || ce;
-    o.byCentro[cn] = r3((o.byCentro[cn] || 0) + numv(a[B.libre]));
+    o.byCentro[cn] = r3((o.byCentro[cn] || 0) + libreV);
     o.byCentroLotes[cn] = (o.byCentroLotes[cn] || 0) + 1;
     const ed = a[B.embd];
     if (typeof ed === 'number'){ const iso = serialToISO(ed); if (iso > o.embd) o.embd = iso; }
@@ -1350,6 +1352,8 @@ function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, s
 function restoreData(){
   const d = lsGet('cruceData3', null);
   if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null;
+    // Formato antiguo de cierres (sin lotes por centro): descartar para que se resuba el Saldo W
+    if (CIE && CIE.detalle && CIE.detalle.length && !CIE.detalle[0].centro) CIE = null;
     if (STK) STKC = Object.keys(STK.centros)[0] || ''; }
 }
 
@@ -1477,7 +1481,7 @@ function setMain(m){
   if (m === 'plan') renderPlan();
 }
 // ================== TAB CIERRES ==================
-const CIEF = {sem: '', nave: '', pais: '', centro: '', ord: 'sem'};
+const CIEF = {sem: '', nave: '', pais: '', centro: '', ord: 'centro'};
 const CIEM_OPEN = new Set();
 function cieMesToggle(m){ if (CIEM_OPEN.has(m)) CIEM_OPEN.delete(m); else CIEM_OPEN.add(m); renderCierres(); }
 function cieSet(campo, v){ CIEF[campo] = v; renderCierres(); }
