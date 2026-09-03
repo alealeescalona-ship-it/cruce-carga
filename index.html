@@ -1182,14 +1182,16 @@ function stkAging(centro){
   STK.rows.filter(r => r.centro === centro && (r.alm === '002' || r.alm === '2') && !esSemi(r)).forEach(r => {
     const ym = pedYM(r.ped);
     const k = ym ? ym.key : '0000';
-    const o = map[k] || (map[k] = {key: k, lbl: ym ? ym.lbl : 'sin código', bloq: 0, porg: 0, sine: 0, tot: 0});
+    const o = map[k] || (map[k] = {key: k, lbl: ym ? ym.lbl : 'sin código', bloq: 0, porg: 0, sine: 0, tot: 0, peds: {}});
     o.tot += r.libre;
+    const pd = o.peds[r.ped] || (o.peds[r.ped] = {ped: r.ped, pais: r.pais, cli: r.cli, bloq: 0, porg: 0, sine: 0, tot: 0});
+    pd.tot += r.libre;
     const {g} = stkGrupo(r);
     if (g === 'MAR' || g === 'INT'){
       const e = stkEstado(r);
-      if (e === 'BLOQ') o.bloq += r.libre;
-      else if (e === 'PORG') o.porg += r.libre;
-      else if (e === 'SINE') o.sine += r.libre;
+      if (e === 'BLOQ'){ o.bloq += r.libre; pd.bloq += r.libre; }
+      else if (e === 'PORG'){ o.porg += r.libre; pd.porg += r.libre; }
+      else if (e === 'SINE'){ o.sine += r.libre; pd.sine += r.libre; }
     }
   });
   return Object.values(map).sort((a, b) => a.key.localeCompare(b.key));
@@ -1615,15 +1617,37 @@ function renderResumen(){
     h += `<tr class="tot"><td>Total</td>` + centros.map(c => { const s = Object.values(G[c]).reduce((a, b) => a + b, 0); tt += s; return `<td class="num">${nf0.format(s)}</td>`; }).join('') + (centros.length > 1 ? `<td class="num">${nf0.format(tt)}</td>` : '') + '</tr>';
     h += '</tbody></table>';
     $('resStock').innerHTML = h;
-    // Por año del pedido
+    // Por año del pedido (desplegable: año -> meses por centro)
     const aa = agingAnual();
-    let ha = '<table style="min-width:560px"><thead><tr><th>Centro</th><th>Año pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Stock total año</th></tr></thead><tbody>';
+    const porAnioR = {};
+    const ordenAnios = [];
+    aa.forEach(o => { if (!porAnioR[o.anio]){ porAnioR[o.anio] = []; ordenAnios.push(o.anio); } porAnioR[o.anio].push(o); });
+    ordenAnios.sort();
+    // meses por centro para el drill-down
+    const mesesPorAnio = {};
+    Object.keys(STK.centros).forEach(c => {
+      stkAging(c).forEach(o => {
+        const a = o.key === '0000' ? 'sin código' : o.key.slice(0, 4);
+        (mesesPorAnio[a] = mesesPorAnio[a] || []).push(Object.assign({centro: STK.centros[c]}, o));
+      });
+    });
+    let ha = '<table style="min-width:560px"><thead><tr><th>Año / Mes</th><th>Centro</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Stock total</th></tr></thead><tbody>';
     let aTb = 0, aTp = 0, aTs = 0, aTt = 0;
     const anioAct = String(new Date().getFullYear());
-    aa.forEach(o => {
-      aTb += o.bloq; aTp += o.porg; aTs += o.sine; aTt += o.tot;
-      const viejo = o.anio !== 'sin código' && o.anio < anioAct;
-      ha += `<tr class="det"><td>${esc(o.centro)}</td><td>${viejo ? `<span class="pill bad"><b>${esc(o.anio)}</b></span>` : `<b>${esc(o.anio)}</b>`}</td><td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td><td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
+    ordenAnios.forEach(anio => {
+      const g = porAnioR[anio];
+      let ab = 0, ap = 0, as = 0, at = 0;
+      g.forEach(o => { ab += o.bloq; ap += o.porg; as += o.sine; at += o.tot; });
+      aTb += ab; aTp += ap; aTs += as; aTt += at;
+      const abierto = RESA_OPEN.has(anio);
+      const viejo = anio !== 'sin código' && anio < anioAct;
+      ha += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="resAnioToggle('${esc(anio)}')"><td><span class="caret">▾</span>${viejo ? `<span class="pill bad"><b>${esc(anio)}</b></span>` : `<b>${esc(anio)}</b>`}</td><td class="cnt">${g.length > 1 ? g.length + ' centros' : esc(g[0].centro)}</td>` +
+        `<td class="num"><b>${ab > 0.5 ? nf0.format(ab) : '—'}</b></td><td class="num"><b>${ap > 0.5 ? nf0.format(ap) : '—'}</b></td><td class="num">${as > 0.5 ? `<span class="neg"><b>${nf0.format(as)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(at)}</b></td></tr>`;
+      if (abierto) (mesesPorAnio[anio] || []).sort((x, y) => x.key.localeCompare(y.key)).forEach(o => {
+        ha += `<tr class="det"><td style="padding-left:32px">${esc(o.lbl)}</td><td class="cli">${esc(o.centro)}</td>` +
+          `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
+          `<td class="num">${o.sine > 0.5 ? `<span class="neg">${nf0.format(o.sine)}</span>` : '—'}</td><td class="num">${nf0.format(o.tot)}</td></tr>`;
+      });
     });
     ha += `<tr class="tot"><td colspan="2">Total</td><td class="num">${nf0.format(aTb)}</td><td class="num">${nf0.format(aTp)}</td><td class="num">${nf0.format(aTs)}</td><td class="num">${nf0.format(aTt)}</td></tr></tbody></table>`;
     $('resAnio').innerHTML = ha;
@@ -1888,7 +1912,11 @@ function stkResumen(centro){
   return filas;
 }
 const AGE_OPEN = new Set([String(new Date().getFullYear())]);
+const AGEM_OPEN = new Set();
 function ageToggle(a){ if (AGE_OPEN.has(a)) AGE_OPEN.delete(a); else AGE_OPEN.add(a); renderStock(); }
+function ageMesToggle(k){ if (AGEM_OPEN.has(k)) AGEM_OPEN.delete(k); else AGEM_OPEN.add(k); renderStock(); }
+const RESA_OPEN = new Set();
+function resAnioToggle(a){ if (RESA_OPEN.has(a)) RESA_OPEN.delete(a); else RESA_OPEN.add(a); renderResumen(); }
 // Grafico: destinos (pais) con mayor carga Por Gestionar y Sin Entrega (barras horizontales agrupadas, SVG)
 function renderChartDest(){
   const el = $('chartDest');
@@ -1977,9 +2005,16 @@ function renderStock(){
         `<td class="num"><b>${ab > 0.5 ? nf0.format(ab) : '—'}</b></td><td class="num"><b>${ap > 0.5 ? nf0.format(ap) : '—'}</b></td>` +
         `<td class="num">${as > 0.5 ? `<span class="neg"><b>${nf0.format(as)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(at)}</b></td></tr>`;
       if (abierto) g.forEach(o => {
-        ha += `<tr class="det"><td style="padding-left:32px">${esc(o.lbl)}</td>` +
+        const mesAbierto = AGEM_OPEN.has(o.key);
+        const nPeds = Object.keys(o.peds || {}).length;
+        ha += `<tr class="grp ${mesAbierto ? '' : 'closed'}" onclick="ageMesToggle('${esc(o.key)}')" style="font-weight:600"><td style="padding-left:26px"><span class="caret">▾</span>${esc(o.lbl)} <span class="cnt">· ${nPeds} pedidos</span></td>` +
           `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
           `<td class="num">${o.sine > 0.5 ? `<span class="neg">${nf0.format(o.sine)}</span>` : '—'}</td><td class="num">${nf0.format(o.tot)}</td></tr>`;
+        if (mesAbierto) Object.values(o.peds || {}).sort((x, y) => y.tot - x.tot).forEach(pd => {
+          ha += `<tr class="det"><td style="padding-left:52px"><span class="mono">${esc(pd.ped)}</span> · ${esc(pd.pais)} · <span class="cli">${esc(pd.cli)}</span></td>` +
+            `<td class="num">${pd.bloq > 0.05 ? fmt(pd.bloq) : '—'}</td><td class="num">${pd.porg > 0.05 ? fmt(pd.porg) : '—'}</td>` +
+            `<td class="num">${pd.sine > 0.05 ? `<span class="neg">${fmt(pd.sine)}</span>` : '—'}</td><td class="num">${fmt(pd.tot)}</td></tr>`;
+        });
       });
     });
     ha += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(tb)}</td><td class="num">${nf0.format(tpq)}</td><td class="num">${nf0.format(ts)}</td><td class="num">${nf0.format(tt)}</td></tr>`;
