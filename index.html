@@ -17,6 +17,7 @@
   --bad-bg:#fbe9e7; --bad-ink:#b3362a;
   --chip:#eef2f7; --row-hover:#f0f5fa; --done:#8796a8; --shadow:0 1px 3px rgba(16,24,40,.08);
   --edit-bg:#fffbe6; --edit-line:#d9c766;
+  --ch1:#0b8066; --ch2:#b3362a;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -26,6 +27,7 @@
     --bad-bg:#41211d; --bad-ink:#ef9a8e;
     --chip:#232e40; --row-hover:#202b3c; --done:#5c6a7d; --shadow:0 1px 3px rgba(0,0,0,.4);
     --edit-bg:#2e2a14; --edit-line:#6e6330;
+    --ch1:#279a7c; --ch2:#b84a38;
   }
 }
 :root[data-theme="dark"]{
@@ -35,6 +37,7 @@
   --bad-bg:#41211d; --bad-ink:#ef9a8e;
   --chip:#232e40; --row-hover:#202b3c; --done:#5c6a7d; --shadow:0 1px 3px rgba(0,0,0,.4);
   --edit-bg:#2e2a14; --edit-line:#6e6330;
+  --ch1:#279a7c; --ch2:#b84a38;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Sans",-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
@@ -144,6 +147,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <button class="tab" id="mt_trans" onclick="setMain('trans')">🚚 Transporte</button>
     <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
     <button class="tab" id="mt_sim" onclick="setMain('sim')">🧮 Simulador</button>
+    <button class="tab" id="mt_cie" onclick="setMain('cie')">⚓ Cierres</button>
     <button class="tab" id="mt_plan" onclick="setMain('plan')">📋 Planificación</button>
   </div>
 
@@ -248,8 +252,10 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="kpis" id="stkKpis"></div>
     <div class="secttl">Stock W en <span id="stkCentroNom"></span></div>
     <div class="tblbox"><div id="tblStock"></div></div>
-    <div class="secttl">📅 Antigüedad del stock por pedido (año / mes del número OE)</div>
-    <p class="note">Mes y año tomados del número de pedido (OE0 + mes + año). Incluye la regla: embarque con Fecha Staking anterior al mes en curso cuenta como Sin Entrega.</p>
+    <div class="secttl">📊 Destinos con mayor carga Por Gestionar y Sin Entrega</div>
+    <div class="tblbox" style="padding:14px"><div id="chartDest"></div></div>
+    <div class="secttl">📅 Antigüedad del stock por pedido (año → mes)</div>
+    <p class="note">Mes y año tomados del número de pedido (OE0 + mes + año). Haz clic en un año para desplegar sus meses. Incluye la regla: embarque con Fecha Staking anterior al mes en curso cuenta como Sin Entrega.</p>
     <div class="tblbox"><div id="tblAging"></div></div>
     <div class="secttl">Semielaborado redirigido (pedidos SEMI sin embarque)</div>
     <div class="tblbox"><div id="tblSemi"></div></div>
@@ -258,6 +264,16 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="secttl">Detalle por categoría</div>
     <div class="subtabs"><select id="stkCat" onchange="renderStockDet()" class="btn"></select></div>
     <div class="tblbox"><div id="tblStockDet"></div></div>
+  </section>
+
+  <!-- ============ TAB CIERRES DE NAVE ============ -->
+  <section id="sec_cie" style="display:none">
+    <p class="note" id="cieNote"></p>
+    <div class="secttl">Resumen semanal de saldos W</div>
+    <p class="note">Tons Inicial = no embarcado al cierre de cada nave (¿Considerar? = SI). Tons Actual = lo que aún tiene stock libre en consolidadores o plantas según la Base; si un pedido se reprogramó en varias naves, su saldo cuenta solo en la <b>última semana</b>. Próx. a salir = pedidos cuyo EmbarqueD en Base es posterior a hoy.</p>
+    <div class="tblbox"><div id="tblCieRes"></div></div>
+    <div class="secttl">Detalle de saldos por pedido</div>
+    <div class="tblbox"><div id="tblCieDet"></div></div>
   </section>
 
   <!-- ============ TAB PLANIFICACION ============ -->
@@ -809,7 +825,7 @@ const REMMAP = {'DYC SAI':['D&C SAI','D&C SAI'], 'PC VALP':['D&C VALPARAÍSO','P
 const CENTRO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL','1807':'BODEGA NACIONAL / DYC LOG.'};
 const PAISES_TI = ['UY','AR','BO','PY'];
 const CLIENTES_DIRECTOS = [['EDIPAC','Edipac'], ['MM PACKAGING','MM Packaging'], ['MARINETTI','Marinetti']];
-let DET = null, SAP = null, TRANS = null, STK = null;
+let DET = null, SAP = null, TRANS = null, STK = null, CIE = null;
 let MAIN = 'carga', TAB = 'G', PLANTA = 'Maule', STKC = '';
 let CHECKS = lsGet('cruceChecks', {});
 let HIST = lsGet('cruceHist073', {});   // {fechaISO: {centros:{code:nombre}, g:{code:{total,mar,int,chdir,chbod,semi,p09}}}}
@@ -838,6 +854,7 @@ async function handleFiles(files){
       const ab = await f.arrayBuffer();
       const wb = XLSX.read(ab, {type:'array'});
       const encontrados = [];
+      let cieAoa = null, cieHdr = -1, baseAoa = null;
       for (const name of wb.SheetNames){
         const ws = wb.Sheets[name];
         const aoa = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
@@ -851,9 +868,18 @@ async function handleFiles(files){
           ingestTransporte(aoa, f.name); encontrados.push('transporte OT-GDE');
         } else if (heads.includes('libre utiliz.') && heads.includes('almacen') && heads.includes('pedido')){
           ingest073(aoa, f.name); encontrados.push('stock 073');
+        } else if (heads.includes('ppos') && heads.includes('libre utiliz.') && heads.includes('embarqued')){
+          baseAoa = aoa;
+        } else if (!cieAoa){
+          for (let hr = 0; hr < Math.min(aoa.length, 8); hr++){
+            const hs = (aoa[hr] || []).map(norm);
+            if (hs.includes('unid. no embarcadas [unid]2') && hs.includes('nave')){ cieAoa = aoa; cieHdr = hr; break; }
+          }
         }
       }
-      msgs.push(encontrados.length ? `✅ ${f.name}: ${encontrados.join(' + ')}` : `⚠️ ${f.name}: no reconocido (se espera formato Datos, 078, OT-GDE o 073)`);
+      if (cieAoa && baseAoa){ ingestCierres(cieAoa, cieHdr, baseAoa, f.name); encontrados.push('cierres de nave + base'); }
+      else if (cieAoa || baseAoa) encontrados.push('Saldo W incompleto (se necesitan cierres Y base juntas)');
+      msgs.push(encontrados.length ? `✅ ${f.name}: ${encontrados.join(' + ')}` : `⚠️ ${f.name}: no reconocido (se espera formato Datos, 078, OT-GDE, 073 o Saldo W)`);
     } catch(err){
       msgs.push(`❌ ${f.name}: error al leer (${err.message})`);
     }
@@ -1235,10 +1261,85 @@ function stkRowsDet(centro, cat){
     return false;
   });
 }
-function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK}); }
+// ================== CIERRES DE NAVE (Saldo W) ==================
+const CENTROS_SALDO = ['1801','1802','1890','1893','1811','1808','1826'];  // plantas + consolidadores (sin bodegas nacionales)
+function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
+  const ch = cieAoa[hdrRow].map(norm);
+  const ci = n => ch.indexOf(n);
+  const C = {nave: ci('nave'), centro: ci('centro consolidaror') >= 0 ? ci('centro consolidaror') : ci('centro consolidador'),
+    ped: ci('pedido'), sem: ci('semana'), tne: ci('tons no embarcadas [tons]'), u2: ci('unid. no embarcadas [unid]2'),
+    cons: ch.findIndex(h => h.includes('considerar')), obs: ci('observacion'), pais: ci('pais texto') >= 0 ? ci('pais texto') : ci('pais'),
+    cli: ci('nombre destinatario')};
+  const bh = baseAoa[0].map(norm);
+  const bi = n => bh.indexOf(n);
+  const B = {ped: bi('documento'), ce: bi('ce.'), libre: bi('libre utiliz.'), embd: bi('embarqued'), lote: bi('lote')};
+  const hoyISO = dateToISO(new Date());
+  // Base: por pedido, solo centros consolidadores/plantas
+  const basePed = {};
+  for (let r = 1; r < baseAoa.length; r++){
+    const a = baseAoa[r]; if (!a) continue;
+    const ce = String(a[B.ce] == null ? '' : a[B.ce]).trim().replace(/\.0$/, '');
+    if (!CENTROS_SALDO.includes(ce)) continue;
+    const ped = String(a[B.ped] || '').trim();
+    if (!ped) continue;
+    const o = basePed[ped] || (basePed[ped] = {lotes: 0, libre: 0, byCentro: {}, embd: ''});
+    o.lotes++;
+    o.libre += numv(a[B.libre]);
+    const cn = CENTRO_NOM[ce] || ce;
+    o.byCentro[cn] = r3((o.byCentro[cn] || 0) + numv(a[B.libre]));
+    const ed = a[B.embd];
+    if (typeof ed === 'number'){ const iso = serialToISO(ed); if (iso > o.embd) o.embd = iso; }
+  }
+  // Cierres: filas consideradas con unidades no embarcadas
+  const pedMap = {};
+  for (let r = hdrRow + 1; r < cieAoa.length; r++){
+    const a = cieAoa[r]; if (!a) continue;
+    const u2 = numv(a[C.u2]);
+    const consid = C.cons >= 0 ? String(a[C.cons] || '').trim().toUpperCase() : 'SI';
+    if (u2 <= 0 || consid !== 'SI') continue;
+    const ped = String(a[C.ped] || '').trim();
+    if (!ped) continue;
+    const sem = Math.round(numv(a[C.sem]));
+    const o = pedMap[ped] || (pedMap[ped] = {ped, entradas: []});
+    o.entradas.push({nave: String(a[C.nave] || '').trim(), sem, tne: numv(a[C.tne]), u2,
+      obs: String(a[C.obs] || '').trim(), pais: String(a[C.pais] || '').trim(), cli: String(a[C.cli] || '').trim(),
+      centroCie: String(a[C.centro] == null ? '' : a[C.centro]).trim()});
+  }
+  // Detalle por pedido: ultima semana programada manda
+  const detalle = [];
+  const resMap = {};
+  const resFor = s => resMap[s] || (resMap[s] = {sem: s, inicial: 0, actual: 0, dan: 0, prox: 0});
+  Object.values(pedMap).forEach(p => {
+    p.entradas.forEach(e => {
+      const rr = resFor(e.sem);
+      rr.inicial += e.tne;
+      if (/DAÑAD|DANAD/i.test(e.obs)) rr.dan += e.tne;
+    });
+    const ult = p.entradas.reduce((a, b) => b.sem >= a.sem ? b : a);
+    const base = basePed[p.ped];
+    const libre = base ? r3(base.libre) : 0;
+    if (libre > 0.005){
+      const rr = resFor(ult.sem);
+      rr.actual += libre;
+      const prox = !!(base.embd && base.embd > hoyISO);
+      if (prox) rr.prox += libre;
+      detalle.push({ped: p.ped, sem: ult.sem, nave: ult.nave, pais: ult.pais, cli: ult.cli,
+        obs: ult.obs, lotes: base.lotes, libre, byCentro: base.byCentro, embd: base.embd,
+        prox, naves: [...new Set(p.entradas.map(e => e.nave))].length});
+    }
+  });
+  detalle.sort((a, b) => (a.sem - b.sem) || b.libre - a.libre);
+  const resumen = Object.values(resMap).sort((a, b) => a.sem - b.sem).map(rr2 => {
+    const emb = Math.max(0, rr2.inicial - rr2.actual);
+    return {sem: rr2.sem, inicial: r3(rr2.inicial), embarcado: r3(emb), actual: r3(rr2.actual),
+      dan: r3(rr2.dan), pct: rr2.inicial > 0 ? emb / rr2.inicial : 0, prox: r3(rr2.prox)};
+  });
+  CIE = {file: fname, fecha: hoyISO, resumen, detalle};
+}
+function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE}); }
 function restoreData(){
   const d = lsGet('cruceData3', null);
-  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null;
+  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null;
     if (STK) STKC = Object.keys(STK.centros)[0] || ''; }
 }
 
@@ -1328,7 +1429,7 @@ function refreshChips(){
 
 function refreshAll(){
   refreshChips();
-  const has = !!(DET || SAP || TRANS || STK);
+  const has = !!(DET || SAP || TRANS || STK || CIE);
   $('upzone').style.display = (DET && SAP && TRANS) ? 'none' : '';
   $('kpis').style.display = DET ? '' : 'none';
   $('mainTabs').style.display = has ? '' : 'none';
@@ -1349,7 +1450,7 @@ function kpis(){
 
 function setMain(m){
   MAIN = m;
-  ['resumen','carga','prio','desp','trans','stock','sim','plan'].forEach(x => {
+  ['resumen','carga','prio','desp','trans','stock','sim','cie','plan'].forEach(x => {
     $('mt_' + x).classList.toggle('active', x === m);
     let show = x === m;
     if ((x === 'carga' || x === 'prio') && !DET) show = false;
@@ -1362,7 +1463,64 @@ function setMain(m){
   if (m === 'trans') renderTrans();
   if (m === 'stock') renderStock();
   if (m === 'sim') renderSim();
+  if (m === 'cie') renderCierres();
   if (m === 'plan') renderPlan();
+}
+// ================== TAB CIERRES ==================
+const CIEF = {sem: '', nave: '', pais: '', centro: '', ord: 'sem'};
+function cieSet(campo, v){ CIEF[campo] = v; renderCierres(); }
+function renderCierres(){
+  if (!CIE){
+    $('cieNote').textContent = '';
+    $('tblCieRes').innerHTML = '<div class="empty">Sube tu archivo <b>Saldo W</b> (con las hojas de Cierres de Nave y Base) para armar este análisis.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+    $('tblCieDet').innerHTML = '';
+    return;
+  }
+  $('cieNote').innerHTML = `Archivo <b>${esc(CIE.file)}</b> · subido el ${fdate(CIE.fecha)} · pedidos con diferencia al cierre (Unid. NO EMBARCADAS [UNID]2 &gt; 0, ¿Considerar? = SI) cruzados con la Base por lote (solo centros ${CENTROS_SALDO.join(', ')})`;
+  // Resumen semanal
+  let h = '<table style="min-width:640px"><thead><tr><th>Semana</th><th class="num">Tons Inicial</th><th class="num">Tons Embarcado</th><th class="num">Tons Actual</th><th class="num">Tons U. Dañadas</th><th class="num">% Embarcado</th><th class="num">Tons Próx. a Salir</th></tr></thead><tbody>';
+  let ti = 0, te = 0, ta = 0, td2 = 0, tp = 0;
+  CIE.resumen.forEach(x => {
+    ti += x.inicial; te += x.embarcado; ta += x.actual; td2 += x.dan; tp += x.prox;
+    const pctCls = x.pct >= 0.9 ? 'ok' : (x.pct >= 0.6 ? 'warn' : 'bad');
+    h += `<tr class="det"><td><b>Semana ${x.sem}</b></td><td class="num">${fmt(x.inicial)}</td><td class="num">${fmt(x.embarcado)}</td>` +
+      `<td class="num">${x.actual > 0.05 ? `<span class="neg"><b>${fmt(x.actual)}</b></span>` : fmt(x.actual)}</td>` +
+      `<td class="num">${x.dan > 0.05 ? fmt(x.dan) : '—'}</td>` +
+      `<td class="num"><span class="pill ${pctCls}">${Math.round(x.pct * 100)}%</span></td>` +
+      `<td class="num">${x.prox > 0.05 ? `<b>${fmt(x.prox)}</b>` : '—'}</td></tr>`;
+  });
+  h += `<tr class="tot"><td>Total</td><td class="num">${fmt(ti)}</td><td class="num">${fmt(te)}</td><td class="num">${fmt(ta)}</td><td class="num">${fmt(td2)}</td><td class="num">${ti > 0 ? Math.round(te / ti * 100) + '%' : '—'}</td><td class="num">${fmt(tp)}</td></tr></tbody></table>`;
+  $('tblCieRes').innerHTML = h;
+  // Detalle con filtros
+  const all = CIE.detalle;
+  const semanas = [...new Set(all.map(x => x.sem))].sort((a, b) => a - b);
+  const naves = [...new Set(all.map(x => x.nave))].sort();
+  const paises = [...new Set(all.map(x => x.pais))].sort();
+  const centros = [...new Set(all.flatMap(x => Object.keys(x.byCentro)))].sort();
+  let list = all.filter(x => (!CIEF.sem || String(x.sem) === CIEF.sem) && (!CIEF.nave || x.nave === CIEF.nave) && (!CIEF.pais || x.pais === CIEF.pais) && (!CIEF.centro || (x.byCentro[CIEF.centro] || 0) > 0));
+  if (CIEF.ord === 'tons') list = list.slice().sort((a, b) => b.libre - a.libre);
+  else if (CIEF.ord === 'nave') list = list.slice().sort((a, b) => (a.nave + a.sem).localeCompare(b.nave + b.sem));
+  const opt = (vals, cur, lbl) => `<option value="">${lbl}</option>` + vals.map(v => `<option value="${esc(v)}" ${String(v) === cur ? 'selected' : ''}>${esc(v)}</option>`).join('');
+  let h2 = '<div class="filters" style="padding:10px 10px 0">' +
+    `<select class="btn" onchange="cieSet('sem', this.value)">${opt(semanas, CIEF.sem, 'Semana: todas')}</select>` +
+    `<select class="btn" onchange="cieSet('nave', this.value)">${opt(naves, CIEF.nave, 'Nave: todas')}</select>` +
+    `<select class="btn" onchange="cieSet('pais', this.value)">${opt(paises, CIEF.pais, 'País: todos')}</select>` +
+    `<select class="btn" onchange="cieSet('centro', this.value)">${opt(centros, CIEF.centro, 'Centro: todos')}</select>` +
+    `<select class="btn" onchange="cieSet('ord', this.value)"><option value="sem" ${CIEF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="tons" ${CIEF.ord === 'tons' ? 'selected' : ''}>Orden: mayor saldo</option><option value="nave" ${CIEF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option></select>` +
+    '</div>';
+  if (!list.length){ $('tblCieDet').innerHTML = h2 + '<div class="empty">Sin saldos con los filtros actuales ✅</div>'; return; }
+  h2 += '<table><thead><tr><th>Semana</th><th>Nave (última prog.)</th><th>País</th><th>Pedido</th><th>Cliente</th><th>Centro del stock</th><th class="num">Q Lotes</th><th class="num">Libre t</th><th>Motivo</th><th>Próx. salida</th></tr></thead><tbody>';
+  let tl = 0, tq = 0;
+  list.forEach(x => {
+    tl += x.libre; tq += x.lotes;
+    const centrosTxt = Object.keys(x.byCentro).map(c => `${esc(c)} (${fmt(x.byCentro[c])})`).join(' · ');
+    h2 += `<tr class="det"><td><b>S${x.sem}</b></td><td><b>${esc(x.nave)}</b>${x.naves > 1 ? ` <span class="pill warn" title="Programado en ${x.naves} naves; cuenta en la última semana">${x.naves} naves</span>` : ''}</td>` +
+      `<td>${esc(x.pais)}</td><td class="mono">${esc(x.ped)}</td><td class="cli">${esc(x.cli)}</td><td class="cli">${centrosTxt}</td>` +
+      `<td class="num">${nf0.format(x.lotes)}</td><td class="num"><b>${fmt(x.libre)}</b></td><td class="cli">${esc(x.obs || '—')}</td>` +
+      `<td>${x.prox ? `<span class="pill ok">EmbarqueD ${fdate(x.embd)}</span>` : '—'}</td></tr>`;
+  });
+  h2 += `<tr class="tot"><td colspan="6">Total (${list.length} pedidos)</td><td class="num">${nf0.format(tq)}</td><td class="num">${fmt(tl)}</td><td colspan="2"></td></tr></tbody></table>`;
+  $('tblCieDet').innerHTML = h2;
 }
 // ================== TAB RESUMEN ==================
 function renderResumen(){
@@ -1653,6 +1811,46 @@ function stkResumen(centro){
   filas.push({tipo: 'tot', lbl: 'Stock Total', t: S.total});
   return filas;
 }
+const AGE_OPEN = new Set([String(new Date().getFullYear())]);
+function ageToggle(a){ if (AGE_OPEN.has(a)) AGE_OPEN.delete(a); else AGE_OPEN.add(a); renderStock(); }
+// Grafico: destinos (pais) con mayor carga Por Gestionar y Sin Entrega (barras horizontales agrupadas, SVG)
+function renderChartDest(){
+  const el = $('chartDest');
+  const map = {};
+  STK.rows.filter(r => r.centro === STKC && (r.alm === '002' || r.alm === '2') && !esSemi(r)).forEach(r => {
+    const {g} = stkGrupo(r);
+    if (g !== 'MAR' && g !== 'INT') return;
+    const e = stkEstado(r);
+    if (e !== 'PORG' && e !== 'SINE') return;
+    const o = map[r.pais] || (map[r.pais] = {pais: r.pais, porg: 0, sine: 0});
+    if (e === 'PORG') o.porg += r.libre; else o.sine += r.libre;
+  });
+  const top = Object.values(map).sort((a, b) => (b.porg + b.sine) - (a.porg + a.sine)).slice(0, 10);
+  if (!top.length){ el.innerHTML = '<div class="empty">Sin carga por gestionar ni sin entrega en este centro.</div>'; return; }
+  const maxV = Math.max(...top.map(o => Math.max(o.porg, o.sine)), 1);
+  const W = 760, labW = 64, valW = 62, barArea = W - labW - valW, rowH = 40, barH = 13, gap = 3;
+  const H = top.length * rowH + 34;
+  let s = `<div class="legend" style="margin-bottom:8px"><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch1);vertical-align:-1px"></span> Por Gestionar</span><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch2);vertical-align:-1px"></span> Sin Entrega</span><span class="prog">top ${top.length} destinos · toneladas · ${esc(STK.centros[STKC] || '')}</span></div>`;
+  s += `<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:560px;max-width:${W}px;font-family:inherit">`;
+  [0.25, 0.5, 0.75, 1].forEach(f => {
+    const x = labW + barArea * f;
+    s += `<line x1="${x}" y1="6" x2="${x}" y2="${H - 24}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<text x="${x}" y="${H - 10}" text-anchor="middle" font-size="10" fill="var(--muted)">${nf0.format(maxV * f)}</text>`;
+  });
+  top.forEach((o, i) => {
+    const y = i * rowH + 10;
+    const w1 = Math.max(barArea * o.porg / maxV, o.porg > 0 ? 3 : 0);
+    const w2 = Math.max(barArea * o.sine / maxV, o.sine > 0 ? 3 : 0);
+    s += `<text x="${labW - 8}" y="${y + barH + 2}" text-anchor="end" font-size="12" font-weight="600" fill="var(--ink)">${esc(o.pais)}</text>`;
+    s += `<rect x="${labW}" y="${y}" width="${w1}" height="${barH}" rx="4" fill="var(--ch1)"><title>${esc(o.pais)} · Por Gestionar: ${fmt(o.porg)} t</title></rect>`;
+    if (o.porg > 0.5) s += `<text x="${labW + w1 + 5}" y="${y + barH - 3}" font-size="10.5" fill="var(--muted)">${nf0.format(o.porg)}</text>`;
+    s += `<rect x="${labW}" y="${y + barH + gap}" width="${w2}" height="${barH}" rx="4" fill="var(--ch2)"><title>${esc(o.pais)} · Sin Entrega: ${fmt(o.sine)} t</title></rect>`;
+    if (o.sine > 0.5) s += `<text x="${labW + w2 + 5}" y="${y + 2 * barH + gap - 3}" font-size="10.5" fill="var(--muted)">${nf0.format(o.sine)}</text>`;
+  });
+  s += `<line x1="${labW}" y1="6" x2="${labW}" y2="${H - 24}" stroke="var(--muted)" stroke-width="1.5"/>`;
+  s += '</svg></div>';
+  el.innerHTML = s;
+}
 function setStkCentro(c){ STKC = c; renderStock(); }
 function renderStock(){
   if (!STK){
@@ -1680,18 +1878,33 @@ function renderStock(){
     `<div class="kpi g"><div class="lbl">Gestionado</div><div class="val">${nf0.format(SS.gestM + SS.gestI)} t</div><div class="det">${pctK(SS.gestM + SS.gestI)} del total</div></div>` +
     `<div class="kpi n"><div class="lbl">Bloqueo de crédito</div><div class="val">${nf0.format(SS.bloqM + SS.bloqI)} t</div><div class="det">${pctK(SS.bloqM + SS.bloqI)} del total</div></div>` +
     `<div class="kpi"><div class="lbl">Semielaborado + P09</div><div class="val">${nf0.format(SS.semi002 + SS.p09)} t</div><div class="det">${pctK(SS.semi002 + SS.p09)} del total</div></div>`;
-  // Antiguedad por año/mes del pedido
+  renderChartDest();
+  // Antiguedad por año -> mes (desplegable por año)
   const ag = stkAging(STKC);
   if (ag.length){
-    const anioAct = new Date().getFullYear();
-    let ha = '<table style="min-width:560px"><thead><tr><th>Año / Mes pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Total mes</th></tr></thead><tbody>';
-    let tb = 0, tpq = 0, ts = 0, tt = 0;
+    const anioAct = String(new Date().getFullYear());
+    const porAnio = {};
     ag.forEach(o => {
-      tb += o.bloq; tpq += o.porg; ts += o.sine; tt += o.tot;
-      const viejo = o.key !== '0000' && +o.key.slice(0, 4) < anioAct;
-      ha += `<tr class="det"><td>${viejo ? `<span class="pill bad"><b>${esc(o.lbl)}</b></span>` : `<b>${esc(o.lbl)}</b>`}</td>` +
-        `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
-        `<td class="num">${o.sine > 0.5 ? `<span class="neg"><b>${nf0.format(o.sine)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(o.tot)}</b></td></tr>`;
+      const a = o.key === '0000' ? 'sin código' : o.key.slice(0, 4);
+      (porAnio[a] = porAnio[a] || []).push(o);
+    });
+    let ha = '<table style="min-width:560px"><thead><tr><th>Año / Mes pedido</th><th class="num">Bloqueo crédito</th><th class="num">Por gestionar</th><th class="num">Sin entrega</th><th class="num">Total</th></tr></thead><tbody>';
+    let tb = 0, tpq = 0, ts = 0, tt = 0;
+    Object.keys(porAnio).sort().forEach(a => {
+      const g = porAnio[a];
+      let ab = 0, ap = 0, as = 0, at = 0;
+      g.forEach(o => { ab += o.bloq; ap += o.porg; as += o.sine; at += o.tot; });
+      tb += ab; tpq += ap; ts += as; tt += at;
+      const abierto = AGE_OPEN.has(a);
+      const viejo = a !== 'sin código' && a < anioAct;
+      ha += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="ageToggle('${esc(a)}')"><td><span class="caret">▾</span>${viejo ? `<span class="pill bad"><b>${esc(a)}</b></span>` : `<b>${esc(a)}</b>`} <span class="cnt">· ${g.length} meses</span></td>` +
+        `<td class="num"><b>${ab > 0.5 ? nf0.format(ab) : '—'}</b></td><td class="num"><b>${ap > 0.5 ? nf0.format(ap) : '—'}</b></td>` +
+        `<td class="num">${as > 0.5 ? `<span class="neg"><b>${nf0.format(as)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(at)}</b></td></tr>`;
+      if (abierto) g.forEach(o => {
+        ha += `<tr class="det"><td style="padding-left:32px">${esc(o.lbl)}</td>` +
+          `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
+          `<td class="num">${o.sine > 0.5 ? `<span class="neg">${nf0.format(o.sine)}</span>` : '—'}</td><td class="num">${nf0.format(o.tot)}</td></tr>`;
+      });
     });
     ha += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(tb)}</td><td class="num">${nf0.format(tpq)}</td><td class="num">${nf0.format(ts)}</td><td class="num">${nf0.format(tt)}</td></tr>`;
     ha += '</tbody></table>';
@@ -2381,6 +2594,12 @@ function buildExport(){
     if (p09Aoa.length > 1) out['Stock P09'] = p09Aoa;
     out['Resumen stock grupos'] = resumenStockAoa();
   }
+  if (CIE){
+    out['Cierres resumen'] = [['Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U Dañadas','% Embarcado','Tons Prox a Salir']]
+      .concat(CIE.resumen.map(x => ['Semana ' + x.sem, x.inicial, x.embarcado, x.actual, x.dan, Math.round(x.pct * 100) + '%', x.prox]));
+    out['Cierres detalle'] = [['Semana','Nave','Pais','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Motivo','EmbarqueD','Prox salida']]
+      .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).map(c => c + ' (' + r3(x.byCentro[c]) + ')').join(' · '), x.lotes, x.libre, x.obs, x.embd || '', x.prox ? 'SI' : 'NO']));
+  }
   const fechasH = Object.keys(HIST).sort().reverse();
   if (fechasH.length){
     const centrosH = simCentros();
@@ -2570,6 +2789,15 @@ function exportPDF(){
     if (!TRANS) return toast('Sube el programa de transporte primero');
     sections = [['UT programadas por planta y destino (zona 1, 1 OT = 1 UT)', transAoa()]];
     fname = 'transporte'; titulo = 'Programa de transporte';
+  } else if (MAIN === 'cie'){
+    if (!CIE) return toast('Sube el archivo Saldo W primero');
+    sections = [
+      ['Resumen semanal de saldos W', [['Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U. Dañadas','% Embarcado','Tons Próx a Salir']]
+        .concat(CIE.resumen.map(x => ['Semana ' + x.sem, r3(x.inicial), r3(x.embarcado), r3(x.actual), r3(x.dan), Math.round(x.pct * 100) + '%', r3(x.prox)]))],
+      ['Detalle de saldos por pedido (última semana programada)', [['Sem','Nave','País','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Próx salida']]
+        .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).join(' · '), x.lotes, r3(x.libre), x.prox ? 'SI (' + x.embd + ')' : '']))]
+    ];
+    fname = 'cierres'; titulo = 'Cierres de nave — saldos W';
   } else if (MAIN === 'stock'){
     if (!STK) return toast('Sube el archivo 073 primero');
     sections = [];
