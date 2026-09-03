@@ -137,14 +137,10 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <p style="font-size:11.5px">Los archivos se procesan solo en tu navegador: no se suben a ningún servidor. Los datos quedan guardados en este equipo para la próxima visita.</p>
   </div>
 
-  <div class="kpis" id="kpis" style="display:none"></div>
-
   <div class="tabs" id="mainTabs" style="display:none">
     <button class="tab" id="mt_resumen" onclick="setMain('resumen')">⭐ Resumen</button>
     <button class="tab active" id="mt_carga" onclick="setMain('carga')">📦 Carga</button>
     <button class="tab" id="mt_prio" onclick="setMain('prio')">🚢 Prioridades naves</button>
-    <button class="tab" id="mt_desp" onclick="setMain('desp')">🚛 Despachos (078)</button>
-    <button class="tab" id="mt_trans" onclick="setMain('trans')">🚚 Transporte</button>
     <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
     <button class="tab" id="mt_sim" onclick="setMain('sim')">🧮 Simulador</button>
     <button class="tab" id="mt_cie" onclick="setMain('cie')">⚓ Cierres</button>
@@ -182,6 +178,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
 
   <!-- ============ TAB CARGA ============ -->
   <section id="sec_carga" style="display:none">
+    <div class="kpis" id="kpis"></div>
     <div class="subtabs">
       <button class="subtab active" id="tabG" onclick="setTab('G')">✅ Gestionada (nave asignada)</button>
       <button class="subtab warn" id="tabN" onclick="setTab('N')">⚠️ No gestionada (embarque teórico)</button>
@@ -235,18 +232,6 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="tblbox"><div id="tblPrio"></div></div>
   </section>
 
-  <!-- ============ TAB DESPACHOS ============ -->
-  <section id="sec_desp" style="display:none">
-    <p class="note" id="despNote"></p>
-    <div class="tblbox"><div id="tblDesp"></div></div>
-  </section>
-
-  <!-- ============ TAB TRANSPORTE ============ -->
-  <section id="sec_trans" style="display:none">
-    <p class="note" id="transNote"></p>
-    <div class="tblbox"><div id="tblTrans"></div></div>
-  </section>
-
   <!-- ============ TAB STOCK 073 ============ -->
   <section id="sec_stock" style="display:none">
     <p class="note" id="stockNote"></p>
@@ -289,6 +274,9 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     </div>
     <div class="secttl">Carga por consolidador — stock <span id="plName1"></span></div>
     <div class="tblbox"><div id="tblPlan1"></div></div>
+    <div class="secttl closed">🚚 Programa transporte del día (OT-GDE, zona 1)</div>
+    <p class="note" id="transNote" style="display:none"></p>
+    <div class="tblbox" style="display:none"><div id="tblTrans"></div></div>
     <div class="secttl">Programa del día vs despachado — <span id="plName2"></span></div>
     <p class="note" id="planNote"></p>
     <div class="subtabs">
@@ -1447,7 +1435,6 @@ function refreshAll(){
   refreshChips();
   const has = !!(DET || SAP || TRANS || STK || CIE);
   $('upzone').style.display = (DET && SAP && TRANS) ? 'none' : '';
-  $('kpis').style.display = DET ? '' : 'none';
   $('mainTabs').style.display = has ? '' : 'none';
   if (DET) kpis();
   setMain(MAIN);
@@ -1466,17 +1453,15 @@ function kpis(){
 
 function setMain(m){
   MAIN = m;
-  ['resumen','carga','prio','desp','trans','stock','sim','cie','plan'].forEach(x => {
+  ['resumen','carga','prio','stock','sim','cie','plan'].forEach(x => {
     $('mt_' + x).classList.toggle('active', x === m);
     let show = x === m;
     if ((x === 'carga' || x === 'prio') && !DET) show = false;
     $('sec_' + x).style.display = show ? '' : 'none';
   });
   if (m === 'resumen') renderResumen();
-  if (m === 'carga' && DET){ if (TAB === 'A'){ setTab('A'); } else { refreshSelects(); render(); } }
+  if (m === 'carga' && DET){ if (TAB === 'A'){ setTab('A'); } else if (TAB === 'S'){ setTab('S'); } else { refreshSelects(); render(); } }
   if (m === 'prio' && DET) renderPrio();
-  if (m === 'desp') renderDesp();
-  if (m === 'trans') renderTrans();
   if (m === 'stock') renderStock();
   if (m === 'sim') renderSim();
   if (m === 'cie') renderCierres();
@@ -1882,8 +1867,6 @@ function copyCorreo(){
 const STK_CATS = [
   ['BLOQ', 'Bloqueo de Crédito', [['BLOQ_M','Marítimo'], ['BLOQ_I','Internacional']], true],
   ['CHDIR', 'Chile Directo', 'clientes', true],
-  ['SEMI', 'Semielaborado Redirigidos', null, true],
-  ['P09A', 'Almacén P09', null, false],
   ['NOG', 'No Gestionado', [['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional']], true],
   ['CHBOD', 'Chile Bodega Nacional', null, false],
   ['GEST_M', 'Gestionado Marítimo', null, false],
@@ -2074,19 +2057,20 @@ function renderStockDet(){
   const agg = {};
   rows.forEach(r => {
     const k = r.ped + '||' + r.cli;
-    const o = agg[k] || (agg[k] = {ped: r.ped, cli: r.cli, pais: r.pais, dest: r.dest, libre: 0, fent: '', nave: r.nave, transp: r.transp, blq: r.blq});
+    const o = agg[k] || (agg[k] = {ped: r.ped, cli: r.cli, pais: r.pais, dest: r.dest, libre: 0, fent: '', fstk: '', nave: r.nave, transp: r.transp, blq: r.blq});
     o.libre += r.libre;
     if (r.fent && (!o.fent || r.fent < o.fent)) o.fent = r.fent;
+    if (r.fstk && (!o.fstk || r.fstk < o.fstk)) o.fstk = r.fstk;
     if (r.nave) o.nave = r.nave;
     if (r.transp) o.transp = r.transp;
   });
-  let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País</th><th>Destinatario</th><th class="num">Libre t</th><th>F. entrega</th><th>Nave / transporte</th><th>Bloqueo</th></tr></thead><tbody>';
+  let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País</th><th>Destinatario</th><th class="num">Libre t</th><th>F. entrega</th><th>Fecha stk</th><th>Nave / transporte</th><th>Bloqueo</th></tr></thead><tbody>';
   let t = 0;
   Object.values(agg).sort((a, b) => b.libre - a.libre).forEach(o => {
     t += o.libre;
-    h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td>${esc(o.cli)}</td><td>${esc(o.pais)}</td><td class="cli">${esc(o.dest)}</td><td class="num">${fmt(o.libre)}</td><td class="mono">${o.fent ? fdate(o.fent) : '—'}</td><td class="cli">${esc(o.nave || o.transp || '—')}</td><td>${o.blq ? `<span class="pill bad">${esc(o.blq)}</span>` : '—'}</td></tr>`;
+    h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td>${esc(o.cli)}</td><td>${esc(o.pais)}</td><td class="cli">${esc(o.dest)}</td><td class="num">${fmt(o.libre)}</td><td class="mono">${o.fent ? fdate(o.fent) : '—'}</td><td class="mono">${o.fstk ? fdate(o.fstk) : '—'}</td><td class="cli">${esc(o.nave || o.transp || '—')}</td><td>${o.blq ? `<span class="pill bad">${esc(o.blq)}</span>` : '—'}</td></tr>`;
   });
-  h += `<tr class="tot"><td colspan="4">Total (${Object.keys(agg).length} pedidos)</td><td class="num">${fmt(t)}</td><td colspan="3"></td></tr></tbody></table>`;
+  h += `<tr class="tot"><td colspan="4">Total (${Object.keys(agg).length} pedidos)</td><td class="num">${fmt(t)}</td><td colspan="4"></td></tr></tbody></table>`;
   $('tblStockDet').innerHTML = h;
 }
 function setPlanta(pl){
@@ -2279,7 +2263,7 @@ function toggleGrp(key){
   if (closed) OPEN[TAB].delete(key); else OPEN[TAB].add(key);
 }
 function expandAll(open){
-  OPEN[TAB] = open ? new Set(filteredRows().map(r => TAB === 'G' ? r.nave : r.cons)) : new Set();
+  OPEN[TAB] = open ? new Set(filteredRows().map(r => TAB === 'G' ? (r.cons + '||' + r.nave) : r.cons)) : new Set();
   render();
 }
 function aggPed(rows){
@@ -2309,41 +2293,64 @@ function render(){
     `<span>Total: <b>${fmt(ma + va)} t</b></span>` +
     `<span class="prog">Revisados: <b>${done}/${pedsAll.length}</b></span>`;
   if (!rows.length){ $('tbl').innerHTML = '<div class="empty">Sin resultados con los filtros actuales.</div>'; return; }
-  const key = TAB === 'G' ? (r => r.nave) : (r => r.cons);
-  const groups = {};
-  rows.forEach(r => { const k = key(r); (groups[k] = groups[k] || []).push(r); });
-  const gkeys = Object.keys(groups).sort();
+  const buscando = $('q').value.trim() !== '';
+  const filaPed = (p, k, abierto, esG) => {
+    const ck = CHECKS[p.ped] ? 'checked' : '';
+    const prodCell = p.prods.length > 1 ? `${p.prods.length} productos` : p.prods[0];
+    let s = `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" ${abierto ? '' : 'style="display:none"'} title="${esc(p.prods.join(' · '))} — ${esc(p.ges)} · ${esc(p.pto)} · planta ${esc(p.pl)} · status ${esc(p.sts.join('/'))} · ${p.npos} pos">`;
+    if (esG){
+      s += `<td class="mono strike" style="padding-left:44px">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td class="mono">${fdate(p.fcd)}</td><td class="mono">${fdate(p.fzp)}</td>`;
+    } else {
+      s += `<td class="mono strike">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td class="cli">${esc(p.nave).replace('TBN - ','')}</td><td class="mono">${fdate(p.fzp)}</td>`;
+    }
+    s += `<td class="num">${p.ma > 0 ? fmt(p.ma) : '—'}</td><td class="num">${p.va > 0 ? fmt(p.va) : '—'}</td>` +
+         `<td><input type="checkbox" ${ck} onchange="toggleCheck('${esc(p.ped)}')"></td></tr>`;
+    return s;
+  };
   let h = '<table><thead><tr>';
   if (TAB === 'G'){
-    h += '<th>Nave / Pedido</th><th>Cliente</th><th>País dest.</th><th>Producto</th><th>Consolidador</th><th>Corte doc.</th><th>Zarpe plan</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th>✓</th>';
-  } else {
-    h += '<th>Consolidador / Pedido</th><th>Cliente</th><th>País dest.</th><th>Producto</th><th>Servicio (TBN)</th><th>Zarpe plan</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th>✓</th>';
-  }
-  h += '</tr></thead><tbody>';
-  const cols = TAB === 'G' ? 10 : 9;
-  gkeys.forEach(k => {
-    const g = groups[k];
-    const peds = aggPed(g);
-    let gm = 0, gv = 0; peds.forEach(p => { gm += p.ma; gv += p.va; });
-    const extra = TAB === 'G'
-      ? [...new Set(g.map(r => r.cons))].join(' · ') + ' · corte: ' + [...new Set(g.map(r => fdate(r.fcd)))].join(', ')
-      : [...new Set(g.map(r => r.paisd))].slice(0,6).join(', ');
-    const abierto = $('q').value.trim() !== '' || OPEN[TAB].has(k);
-    h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="${cols - 3}"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${peds.length} ped · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
-    peds.sort((a, b) => (TAB === 'G' ? (a.fcd + a.ped).localeCompare(b.fcd + b.ped) : (a.paisd + a.fzp + a.ped).localeCompare(b.paisd + b.fzp + b.ped)));
-    peds.forEach(p => {
-      const ck = CHECKS[p.ped] ? 'checked' : '';
-      const prodCell = p.prods.length > 1 ? `${p.prods.length} productos` : p.prods[0];
-      h += `<tr class="det ${ck ? 'done' : ''}" data-g="${esc(k)}" ${abierto ? '' : 'style="display:none"'} title="${esc(p.prods.join(' · '))} — ${esc(p.ges)} · ${esc(p.pto)} · planta ${esc(p.pl)} · status ${esc(p.sts.join('/'))} · ${p.npos} pos">`;
-      if (TAB === 'G'){
-        h += `<td class="mono strike">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td><span class="pill ok">${esc(p.cons)}</span></td><td class="mono">${fdate(p.fcd)}</td><td class="mono">${fdate(p.fzp)}</td>`;
-      } else {
-        h += `<td class="mono strike">${esc(p.ped)}</td><td><span class="strike">${esc(p.cli)}</span></td><td>${esc(p.paisd)}</td><td class="cli">${esc(prodCell)}</td><td class="cli">${esc(p.nave).replace('TBN - ','')}</td><td class="mono">${fdate(p.fzp)}</td>`;
-      }
-      h += `<td class="num">${p.ma > 0 ? fmt(p.ma) : '—'}</td><td class="num">${p.va > 0 ? fmt(p.va) : '—'}</td>` +
-           `<td><input type="checkbox" ${ck} onchange="toggleCheck('${esc(p.ped)}')"></td></tr>`;
+    // Consolidador -> Nave (desplegable) -> Pedidos
+    h += '<th>Consolidador / Nave / Pedido</th><th>Cliente</th><th>País dest.</th><th>Producto</th><th>Corte doc.</th><th>Zarpe plan</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th>✓</th></tr></thead><tbody>';
+    const porCons = {};
+    rows.forEach(r => { (porCons[r.cons] = porCons[r.cons] || []).push(r); });
+    Object.keys(porCons).sort().forEach(cons => {
+      const gc = porCons[cons];
+      const pedsC = aggPed(gc);
+      let cm = 0, cv = 0; pedsC.forEach(p => { cm += p.ma; cv += p.va; });
+      h += `<tr class="tot"><td colspan="6">⚓ ${esc(cons)} <span class="cnt" style="font-weight:500">· ${pedsC.length} pedidos</span></td><td class="num">${fmt(cm)}</td><td class="num">${fmt(cv)}</td><td></td></tr>`;
+      const porNave = {};
+      gc.forEach(r => { (porNave[r.nave] = porNave[r.nave] || []).push(r); });
+      Object.keys(porNave).sort((a, b) => {
+        const fa = porNave[a].reduce((m, r) => r.fcd && r.fcd < m ? r.fcd : m, '9999');
+        const fb = porNave[b].reduce((m, r) => r.fcd && r.fcd < m ? r.fcd : m, '9999');
+        return (fa + a).localeCompare(fb + b);
+      }).forEach(nave => {
+        const gn = porNave[nave];
+        const peds = aggPed(gn);
+        let gm = 0, gv = 0; peds.forEach(p => { gm += p.ma; gv += p.va; });
+        const k = cons + '||' + nave;
+        const abierto = buscando || OPEN.G.has(k);
+        const cortes = [...new Set(gn.map(r => fdate(r.fcd)))].join(', ');
+        h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="6" style="padding-left:24px"><span class="caret">▾</span><b>${esc(nave)}</b> <span class="cnt">· ${peds.length} ped · corte: ${cortes}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
+        peds.sort((a, b) => (a.fcd + a.ped).localeCompare(b.fcd + b.ped));
+        peds.forEach(p => { h += filaPed(p, k, abierto, true); });
+      });
     });
-  });
+  } else {
+    h += '<th>Consolidador / Pedido</th><th>Cliente</th><th>País dest.</th><th>Producto</th><th>Servicio (TBN)</th><th>Zarpe plan</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th>✓</th></tr></thead><tbody>';
+    const groups = {};
+    rows.forEach(r => { (groups[r.cons] = groups[r.cons] || []).push(r); });
+    Object.keys(groups).sort().forEach(k => {
+      const g = groups[k];
+      const peds = aggPed(g);
+      let gm = 0, gv = 0; peds.forEach(p => { gm += p.ma; gv += p.va; });
+      const extra = [...new Set(g.map(r => r.paisd))].slice(0, 6).join(', ');
+      const abierto = buscando || OPEN.N.has(k);
+      h += `<tr class="grp ${abierto ? '' : 'closed'}" data-k="${esc(k)}" onclick="toggleGrp('${esc(k).replace(/'/g, "\\'")}')"><td colspan="6"><span class="caret">▾</span>${esc(k)} <span class="cnt">· ${peds.length} ped · ${esc(extra)}</span></td><td class="num">${fmt(gm)}</td><td class="num">${fmt(gv)}</td><td></td></tr>`;
+      peds.sort((a, b) => (a.paisd + a.fzp + a.ped).localeCompare(b.paisd + b.fzp + b.ped));
+      peds.forEach(p => { h += filaPed(p, k, abierto, false); });
+    });
+  }
   h += '</tbody></table>';
   $('tbl').innerHTML = h;
 }
@@ -2533,6 +2540,7 @@ function renderPlan(){
   h2 += `<tr class="tot"><td>Total ${esc(PLANTA)}</td><td class="num">${fmtU(sp)}</td><td class="num">${fmtU(sd)}</td><td class="num">${fmtU(spor)}</td><td class="num">${fmt(ston)}</td><td class="num">${fmt(sr)}</td><td class="num">${fmtU(sr / CFG.tPlan)}</td></tr>`;
   h2 += '</tbody></table>';
   $('tblPlan2').innerHTML = h2;
+  renderTrans();
 }
 function planProg(k, v){
   if (String(v).trim() === ''){ delete PLAN.progO[PLANTA][k]; }
@@ -2971,6 +2979,8 @@ function exportPDF(){
       if (DET) sections.push(['Carga por consolidador — ' + pl, consAoa(pl)]);
       sections.push(['Programa del día vs despachado — ' + pl, progAoa(pl)]);
     });
+    if (TRANS) sections.push(['Programa transporte (zona 1, 1 OT = 1 UT)', transAoa()]);
+    if (SAP) sections.push(['Despachos 078 por centro', despAoa()]);
     fname = 'planificacion'; titulo = 'Planificación por planta';
   }
   const {jsPDF} = window.jspdf;
