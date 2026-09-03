@@ -161,9 +161,6 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
     <p class="note">Embarques <b>pendientes</b> (sin contabilizar) donde la fecha fin ready cae DESPUÉS del corte documental — no alcanzan a estar listos.</p>
     <div class="tblbox"><div id="resReady"></div></div>
-    <div class="secttl">🏭 Embarques gestionados con falta de producción (por fecha de corte)</div>
-    <p class="note">Pedidos <b>pendientes</b> con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
-    <div class="tblbox"><div id="resFalta"></div></div>
   </section>
 
   <!-- ============ TAB SIMULADOR ============ -->
@@ -208,6 +205,9 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     </div>
     <div class="summary" id="summary"></div>
     <div class="tblbox"><div id="tbl"></div></div>
+    <div class="secttl closed">🏭 Embarques gestionados con falta de producción (por fecha de corte)</div>
+    <p class="note" style="display:none">Pedidos <b>pendientes</b> con nave asignada donde lo producido aún no alcanza la cantidad de la entrega.</p>
+    <div class="tblbox" style="display:none"><div id="cargaFalta"></div></div>
   </section>
 
   <!-- ============ TAB PRIORIDADES ============ -->
@@ -244,10 +244,6 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="secttl">📅 Antigüedad del stock por pedido (año → mes)</div>
     <p class="note">Mes y año tomados del número de pedido (OE0 + mes + año). Haz clic en un año para desplegar sus meses. Incluye la regla: embarque con Fecha Staking anterior al mes en curso cuenta como Sin Entrega.</p>
     <div class="tblbox"><div id="tblAging"></div></div>
-    <div class="secttl">Semielaborado redirigido (pedidos SEMI sin embarque)</div>
-    <div class="tblbox"><div id="tblSemi"></div></div>
-    <div class="secttl">Almacén P09</div>
-    <div class="tblbox"><div id="tblP09"></div></div>
     <div class="secttl">Detalle por categoría</div>
     <div class="subtabs"><select id="stkCat" onchange="renderStockDet()" class="btn"></select></div>
     <div class="tblbox"><div id="tblStockDet"></div></div>
@@ -1460,7 +1456,7 @@ function setMain(m){
     $('sec_' + x).style.display = show ? '' : 'none';
   });
   if (m === 'resumen') renderResumen();
-  if (m === 'carga' && DET){ if (TAB === 'A'){ setTab('A'); } else if (TAB === 'S'){ setTab('S'); } else { refreshSelects(); render(); } }
+  if (m === 'carga' && DET){ renderFaltaCarga(); if (TAB === 'A'){ setTab('A'); } else if (TAB === 'S'){ setTab('S'); } else { refreshSelects(); render(); } }
   if (m === 'prio' && DET) renderPrio();
   if (m === 'stock') renderStock();
   if (m === 'sim') renderSim();
@@ -1683,22 +1679,27 @@ function renderResumen(){
       h += `<tr class="tot"><td colspan="11">${rdy.length} embarques con fin ready posterior al corte</td></tr></tbody></table>`;
       $('resReady').innerHTML = h;
     } else $('resReady').innerHTML = '<div class="empty">' + (DET.ready ? 'Sin embarques con fin ready posterior al corte ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
-    const fal = (DET.falta || []).slice(0, 60);
-    if (fal.length){
-      let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Entrega</th><th>Transporte</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
-      let tf = 0;
-      fal.forEach(f => {
-        tf += f.falta;
-        h += `<tr class="det"><td class="mono">${esc(f.ped)}</td><td>${esc(f.cli)}</td><td>${esc(f.nave)}</td><td class="cli">${esc(f.cons)}</td>${refCell(f)}<td class="mono"><b>${fdate(f.fcd)}</b></td><td class="num">${fmt(f.ge)}</td><td class="num">${fmt(f.py)}</td><td class="num"><span class="neg"><b>${fmt(f.falta)}</b></span></td></tr>`;
-      });
-      h += `<tr class="tot"><td colspan="9">Total falta de producción (${fal.length} pedidos)</td><td class="num">${fmt(tf)}</td></tr></tbody></table>`;
-      $('resFalta').innerHTML = h;
-    } else $('resFalta').innerHTML = '<div class="empty">' + (DET.falta ? 'Sin faltas de producción ✅' : 'Vuelve a subir el detalle para calcular esto.') + '</div>';
   } else {
     $('resNaves').innerHTML = '<div class="empty">Sube el detalle de cartulinas.</div>';
     $('resReady').innerHTML = '';
-    $('resFalta').innerHTML = '';
   }
+}
+// Falta de produccion (vive en la pestaña Carga)
+function renderFaltaCarga(){
+  const el = $('cargaFalta');
+  if (!el) return;
+  if (!DET || !DET.falta){ el.innerHTML = '<div class="empty">Vuelve a subir el detalle para calcular esto.</div>'; return; }
+  const refC = o => `<td class="mono">${o.ents && o.ents.length ? esc(o.ents.join(', ')) : '—'}</td><td class="mono">${o.trs && o.trs.length ? esc(o.trs.join(', ')) : '—'}</td>`;
+  const fal = DET.falta.slice(0, 60);
+  if (!fal.length){ el.innerHTML = '<div class="empty">Sin faltas de producción ✅</div>'; return; }
+  let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Entrega</th><th>Transporte</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
+  let tf = 0;
+  fal.forEach(f => {
+    tf += f.falta;
+    h += `<tr class="det"><td class="mono">${esc(f.ped)}</td><td>${esc(f.cli)}</td><td>${esc(f.nave)}</td><td class="cli">${esc(f.cons)}</td>${refC(f)}<td class="mono"><b>${fdate(f.fcd)}</b></td><td class="num">${fmt(f.ge)}</td><td class="num">${fmt(f.py)}</td><td class="num"><span class="neg"><b>${fmt(f.falta)}</b></span></td></tr>`;
+  });
+  h += `<tr class="tot"><td colspan="9">Total falta de producción (${fal.length} pedidos)</td><td class="num">${fmt(tf)}</td></tr></tbody></table>`;
+  el.innerHTML = h;
 }
 // ================== TAB SIMULADOR ==================
 function simCentros(){
@@ -1867,6 +1868,8 @@ function copyCorreo(){
 const STK_CATS = [
   ['BLOQ', 'Bloqueo de Crédito', [['BLOQ_M','Marítimo'], ['BLOQ_I','Internacional']], true],
   ['CHDIR', 'Chile Directo', 'clientes', true],
+  ['SEMI', 'Semielaborado Redirigidos', null, true],
+  ['P09A', 'Almacén P09', null, false],
   ['NOG', 'No Gestionado', [['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional']], true],
   ['CHBOD', 'Chile Bodega Nacional', null, false],
   ['GEST_M', 'Gestionado Marítimo', null, false],
@@ -1945,7 +1948,7 @@ function renderStock(){
     $('stkCentros').innerHTML = '';
     $('stkKpis').innerHTML = '';
     $('tblStock').innerHTML = '<div class="empty">Sube el archivo 073 (stock en planta y consolidadores) para ver este análisis.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
-    $('tblAging').innerHTML = ''; $('tblP09').innerHTML = ''; $('tblSemi').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
+    $('tblAging').innerHTML = ''; $('tblStockDet').innerHTML = ''; $('stkCat').innerHTML = '';
     $('stkCentroNom').textContent = '';
     return;
   }
@@ -2018,30 +2021,7 @@ function renderStock(){
   });
   h += '</tbody></table>';
   $('tblStock').innerHTML = h;
-  // Tablas aparte: SEMI y P09
-  const tablaAparte = (cat, targetId, totalLbl, vacio) => {
-    const rws = stkRowsDet(STKC, cat);
-    if (!rws.length){ $(targetId).innerHTML = `<div class="empty">${vacio}</div>`; return; }
-    let h2 = '<table><thead><tr><th>Centro</th><th>País</th><th>Destinatario</th><th>Pedido</th><th>Nave</th><th>Fecha stk</th><th class="num">Libre utiliz. t</th></tr></thead><tbody>';
-    let t = 0;
-    const agg = {};
-    rws.forEach(r => {
-      const k = r.pais + '||' + (r.dest || r.cli) + '||' + r.ped;
-      const o = agg[k] || (agg[k] = {pais: r.pais, dest: r.dest || r.cli, ped: r.ped, libre: 0, naves: [], fstk: ''});
-      o.libre += r.libre;
-      if (r.nave && !o.naves.includes(r.nave)) o.naves.push(r.nave);
-      if (r.fstk && (!o.fstk || r.fstk < o.fstk)) o.fstk = r.fstk;
-    });
-    Object.values(agg).sort((a, b) => b.libre - a.libre).forEach(o => {
-      t += o.libre;
-      h2 += `<tr class="det"><td>${esc(STK.centros[STKC])}</td><td>${esc(o.pais)}</td><td>${esc(o.dest)}</td><td class="mono">${esc(o.ped) || '<span class="cli">sin pedido</span>'}</td><td class="cli">${o.naves.length ? esc(o.naves.join(', ')) : '—'}</td><td class="mono">${o.fstk ? fdate(o.fstk) : '—'}</td><td class="num">${fmt(o.libre)}</td></tr>`;
-    });
-    h2 += `<tr class="tot"><td colspan="6">${totalLbl}</td><td class="num">${fmt(t)}</td></tr></tbody></table>`;
-    $(targetId).innerHTML = h2;
-  };
-  tablaAparte('SEMI', 'tblSemi', 'Total semielaborado redirigido', 'Sin pedidos SEMI sin embarque en este centro.');
-  tablaAparte('P09', 'tblP09', 'Total almacén P09', 'Sin stock P09 en este centro.');
-  // selector de categoría para detalle
+  // selector de categoría para detalle (Semielaborado y P09 se consultan aquí)
   const cats = [['GEST_M','Gestionado Marítimo'], ['GEST_I','Gestionado Terrestre Internacional'], ['PORG_M','Por Gestionar Marítimo'], ['PORG_I','Por Gestionar Terrestre Internacional'], ['SINE_M','Sin Entrega Marítimo'], ['SINE_I','Sin Entrega Internacional'], ['BLOQ_M','Bloqueado Marítimo'], ['BLOQ_I','Bloqueado Internacional'], ['CHDIR','Chile Directo'], ['CHBOD','Chile Bodega Nacional'], ['SEMI','Semielaborado (SEMI sin embarque)'], ['P09','Almacén P09']];
   const cur = $('stkCat').value;
   $('stkCat').innerHTML = cats.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
@@ -2254,6 +2234,8 @@ function clearChecks(){
   render();
 }
 const OPEN = {G: new Set(), N: new Set()};
+const OPENC = new Set();
+function toggleCons(c){ if (OPENC.has(c)) OPENC.delete(c); else OPENC.add(c); render(); }
 function toggleGrp(key){
   const rowsEls = document.querySelectorAll(`tr[data-g="${CSS.escape(key)}"]`);
   const head = document.querySelector(`tr.grp[data-k="${CSS.escape(key)}"]`);
@@ -2264,6 +2246,7 @@ function toggleGrp(key){
 }
 function expandAll(open){
   OPEN[TAB] = open ? new Set(filteredRows().map(r => TAB === 'G' ? (r.cons + '||' + r.nave) : r.cons)) : new Set();
+  if (TAB === 'G'){ OPENC.clear(); if (open) filteredRows().forEach(r => OPENC.add(r.cons)); }
   render();
 }
 function aggPed(rows){
@@ -2317,14 +2300,17 @@ function render(){
       const gc = porCons[cons];
       const pedsC = aggPed(gc);
       let cm = 0, cv = 0; pedsC.forEach(p => { cm += p.ma; cv += p.va; });
-      h += `<tr class="tot"><td colspan="6">⚓ ${esc(cons)} <span class="cnt" style="font-weight:500">· ${pedsC.length} pedidos</span></td><td class="num">${fmt(cm)}</td><td class="num">${fmt(cv)}</td><td></td></tr>`;
       const porNave = {};
       gc.forEach(r => { (porNave[r.nave] = porNave[r.nave] || []).push(r); });
-      Object.keys(porNave).sort((a, b) => {
+      const navesOrd = Object.keys(porNave).sort((a, b) => {
         const fa = porNave[a].reduce((m, r) => r.fcd && r.fcd < m ? r.fcd : m, '9999');
         const fb = porNave[b].reduce((m, r) => r.fcd && r.fcd < m ? r.fcd : m, '9999');
         return (fa + a).localeCompare(fb + b);
-      }).forEach(nave => {
+      });
+      const consAbierto = buscando || OPENC.has(cons);
+      h += `<tr class="tot" style="cursor:pointer;user-select:none" onclick="toggleCons('${esc(cons).replace(/'/g, "\\'")}')"><td colspan="6"><span class="caret" style="display:inline-block;${consAbierto ? '' : 'transform:rotate(-90deg)'}">▾</span> ⚓ ${esc(cons)} <span class="cnt" style="font-weight:500">· ${navesOrd.length} naves · ${pedsC.length} pedidos</span></td><td class="num">${fmt(cm)}</td><td class="num">${fmt(cv)}</td><td></td></tr>`;
+      if (!consAbierto) return;
+      navesOrd.forEach(nave => {
         const gn = porNave[nave];
         const peds = aggPed(gn);
         let gm = 0, gv = 0; peds.forEach(p => { gm += p.ma; gv += p.va; });
@@ -2879,8 +2865,6 @@ function exportPDF(){
       if (u.length > 1) sections.push(['Naves urgentes (corte documental)', u]);
       const rdy = readyAoa();
       if (rdy.length > 1) sections.push(['Fin ready posterior al corte documental', rdy]);
-      const f = faltaAoa();
-      if (f.length > 1) sections.push(['Embarques gestionados con falta de producción (por fecha de corte)', f]);
     }
     if (CIE){
       const salC = cieSaldosPorCentro();
@@ -2908,6 +2892,8 @@ function exportPDF(){
     if (!DET) return toast('Sube el detalle de cartulinas primero');
     sections = [['Carga gestionada — resumen por nave (status Pendiente)', resumenG()],
                 ['Carga no gestionada — resumen por consolidador y país', resumenN()]];
+    const fPdf = faltaAoa();
+    if (fPdf.length > 1) sections.push(['Embarques gestionados con falta de producción (por fecha de corte)', fPdf]);
     if (DET.saldos && DET.saldos.length){
       const colsU = UBIC_ORDEN.filter(u => DET.saldos.some(s => (s.u[u] || 0) > 0));
       sections.push(['Saldos de embarques contabilizados (semana martes a lunes por zarpe real, n° −1)',
