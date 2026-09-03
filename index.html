@@ -158,6 +158,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="tblbox"><div id="resStock"></div></div>
     <div class="secttl">Stock 073 por año del pedido</div>
     <div class="tblbox"><div id="resAnio"></div></div>
+    <div class="secttl">⚓ Saldos W por consolidador y planta</div>
+    <div class="tblbox"><div id="resSaldosW"></div></div>
     <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
@@ -1282,11 +1284,12 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
     if (!CENTROS_SALDO.includes(ce)) continue;
     const ped = String(a[B.ped] || '').trim();
     if (!ped) continue;
-    const o = basePed[ped] || (basePed[ped] = {lotes: 0, libre: 0, byCentro: {}, embd: ''});
+    const o = basePed[ped] || (basePed[ped] = {lotes: 0, libre: 0, byCentro: {}, byCentroLotes: {}, embd: ''});
     o.lotes++;
     o.libre += numv(a[B.libre]);
     const cn = CENTRO_NOM[ce] || ce;
     o.byCentro[cn] = r3((o.byCentro[cn] || 0) + numv(a[B.libre]));
+    o.byCentroLotes[cn] = (o.byCentroLotes[cn] || 0) + 1;
     const ed = a[B.embd];
     if (typeof ed === 'number'){ const iso = serialToISO(ed); if (iso > o.embd) o.embd = iso; }
   }
@@ -1325,9 +1328,14 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
       rr.actual += libre;
       const prox = !!(base.embd && base.embd > hoyISO);
       if (prox) rr.prox += libre;
-      detalle.push({ped: p.ped, sem: ult.sem, nave: ult.nave, pais: ult.pais, cli: ult.cli,
-        obs: ult.obs, lotes: base.lotes, libre, byCentro: base.byCentro, embd: base.embd,
-        prox, naves: [...new Set(p.entradas.map(e => e.nave))].length});
+      const nNaves = [...new Set(p.entradas.map(e => e.nave))].length;
+      // Una fila por centro: se ve cuanto tiene cada consolidador / planta
+      Object.keys(base.byCentro).forEach(cn => {
+        if (base.byCentro[cn] <= 0.005) return;
+        detalle.push({ped: p.ped, sem: ult.sem, nave: ult.nave, pais: ult.pais, cli: ult.cli,
+          obs: ult.obs, centro: cn, lotes: base.byCentroLotes[cn] || 0, libre: r3(base.byCentro[cn]),
+          embd: base.embd, prox, naves: nNaves});
+      });
     }
   });
   detalle.sort((a, b) => (a.sem - b.sem) || b.libre - a.libre);
@@ -1514,36 +1522,59 @@ function renderCierres(){
   });
   h += `<tr class="tot"><td>Total</td><td class="num">${fmt(ti)}</td><td class="num">${fmt(te)}</td><td class="num">${fmt(ta)}</td><td class="num">${fmt(td2)}</td><td class="num">${ti > 0 ? Math.round(te / ti * 100) + '%' : '—'}</td><td class="num">${fmt(tp)}</td></tr></tbody></table>`;
   $('tblCieRes').innerHTML = h;
-  // Detalle con filtros
-  const all = CIE.detalle;
+  // Detalle con filtros (una fila por pedido x centro)
+  const all = CIE.detalle.flatMap(x => x.centro ? [x] : Object.keys(x.byCentro || {}).map(c => Object.assign({}, x, {centro: c, libre: x.byCentro[c], lotes: 0})));
   const semanas = [...new Set(all.map(x => x.sem))].sort((a, b) => a - b);
   const naves = [...new Set(all.map(x => x.nave))].sort();
   const paises = [...new Set(all.map(x => x.pais))].sort();
-  const centros = [...new Set(all.flatMap(x => Object.keys(x.byCentro)))].sort();
-  let list = all.filter(x => (!CIEF.sem || String(x.sem) === CIEF.sem) && (!CIEF.nave || x.nave === CIEF.nave) && (!CIEF.pais || x.pais === CIEF.pais) && (!CIEF.centro || (x.byCentro[CIEF.centro] || 0) > 0));
+  const centros = [...new Set(all.map(x => x.centro))].sort();
+  let list = all.filter(x => (!CIEF.sem || String(x.sem) === CIEF.sem) && (!CIEF.nave || x.nave === CIEF.nave) && (!CIEF.pais || x.pais === CIEF.pais) && (!CIEF.centro || x.centro === CIEF.centro));
   if (CIEF.ord === 'tons') list = list.slice().sort((a, b) => b.libre - a.libre);
   else if (CIEF.ord === 'nave') list = list.slice().sort((a, b) => (a.nave + a.sem).localeCompare(b.nave + b.sem));
+  else if (CIEF.ord === 'centro') list = list.slice().sort((a, b) => (a.centro + a.sem + a.ped).localeCompare(b.centro + b.sem + b.ped));
   const opt = (vals, cur, lbl) => `<option value="">${lbl}</option>` + vals.map(v => `<option value="${esc(v)}" ${String(v) === cur ? 'selected' : ''}>${esc(v)}</option>`).join('');
   let h2 = '<div class="filters" style="padding:10px 10px 0">' +
     `<select class="btn" onchange="cieSet('sem', this.value)">${opt(semanas, CIEF.sem, 'Semana: todas')}</select>` +
     `<select class="btn" onchange="cieSet('nave', this.value)">${opt(naves, CIEF.nave, 'Nave: todas')}</select>` +
     `<select class="btn" onchange="cieSet('pais', this.value)">${opt(paises, CIEF.pais, 'País: todos')}</select>` +
     `<select class="btn" onchange="cieSet('centro', this.value)">${opt(centros, CIEF.centro, 'Centro: todos')}</select>` +
-    `<select class="btn" onchange="cieSet('ord', this.value)"><option value="sem" ${CIEF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="tons" ${CIEF.ord === 'tons' ? 'selected' : ''}>Orden: mayor saldo</option><option value="nave" ${CIEF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option></select>` +
+    `<select class="btn" onchange="cieSet('ord', this.value)"><option value="sem" ${CIEF.ord === 'sem' ? 'selected' : ''}>Orden: semana</option><option value="centro" ${CIEF.ord === 'centro' ? 'selected' : ''}>Orden: centro</option><option value="tons" ${CIEF.ord === 'tons' ? 'selected' : ''}>Orden: mayor saldo</option><option value="nave" ${CIEF.ord === 'nave' ? 'selected' : ''}>Orden: nave</option></select>` +
     '</div>';
   if (!list.length){ $('tblCieDet').innerHTML = h2 + '<div class="empty">Sin saldos con los filtros actuales ✅</div>'; return; }
-  h2 += '<table><thead><tr><th>Semana</th><th>Nave (última prog.)</th><th>País</th><th>Pedido</th><th>Cliente</th><th>Centro del stock</th><th class="num">Q Lotes</th><th class="num">Libre t</th><th>Motivo</th><th>Próx. salida</th></tr></thead><tbody>';
+  h2 += '<table><thead><tr><th>Semana</th><th>Centro</th><th>Nave (última prog.)</th><th>País</th><th>Pedido</th><th>Cliente</th><th class="num">Q Lotes</th><th class="num">Libre t</th><th>Motivo</th><th>Próx. salida</th></tr></thead><tbody>';
   let tl = 0, tq = 0;
+  const conSub = CIEF.ord === 'centro';
+  let cur = null, sc = 0;
+  const sub = () => { if (conSub && cur !== null) h2 += `<tr class="tot"><td colspan="7">Total ${esc(cur)}</td><td class="num">${fmt(sc)}</td><td colspan="2"></td></tr>`; };
   list.forEach(x => {
-    tl += x.libre; tq += x.lotes;
-    const centrosTxt = Object.keys(x.byCentro).map(c => `${esc(c)} (${fmt(x.byCentro[c])})`).join(' · ');
-    h2 += `<tr class="det"><td><b>S${x.sem}</b></td><td><b>${esc(x.nave)}</b>${x.naves > 1 ? ` <span class="pill warn" title="Programado en ${x.naves} naves; cuenta en la última semana">${x.naves} naves</span>` : ''}</td>` +
-      `<td>${esc(x.pais)}</td><td class="mono">${esc(x.ped)}</td><td class="cli">${esc(x.cli)}</td><td class="cli">${centrosTxt}</td>` +
-      `<td class="num">${nf0.format(x.lotes)}</td><td class="num"><b>${fmt(x.libre)}</b></td><td class="cli">${esc(x.obs || '—')}</td>` +
+    if (conSub && x.centro !== cur){ sub(); cur = x.centro; sc = 0; }
+    sc += x.libre; tl += x.libre; tq += x.lotes;
+    const esPlanta = /planta/i.test(x.centro);
+    h2 += `<tr class="det"><td><b>S${x.sem}</b></td><td><span class="pill ${esPlanta ? 'bad' : 'warn'}">${esc(x.centro)}</span></td>` +
+      `<td><b>${esc(x.nave)}</b>${x.naves > 1 ? ` <span class="pill warn" title="Programado en ${x.naves} naves; cuenta en la última semana">${x.naves} naves</span>` : ''}</td>` +
+      `<td>${esc(x.pais)}</td><td class="mono">${esc(x.ped)}</td><td class="cli">${esc(x.cli)}</td>` +
+      `<td class="num">${x.lotes ? nf0.format(x.lotes) : '—'}</td><td class="num"><b>${fmt(x.libre)}</b></td><td class="cli">${esc(x.obs || '—')}</td>` +
       `<td>${x.prox ? `<span class="pill ok">EmbarqueD ${fdate(x.embd)}</span>` : '—'}</td></tr>`;
   });
-  h2 += `<tr class="tot"><td colspan="6">Total (${list.length} pedidos)</td><td class="num">${nf0.format(tq)}</td><td class="num">${fmt(tl)}</td><td colspan="2"></td></tr></tbody></table>`;
+  sub();
+  h2 += `<tr class="tot"><td colspan="6">Total (${list.length} líneas)</td><td class="num">${nf0.format(tq)}</td><td class="num">${fmt(tl)}</td><td colspan="2"></td></tr></tbody></table>`;
   $('tblCieDet').innerHTML = h2;
+}
+// Saldos W agregados por centro (para el Resumen)
+function cieSaldosPorCentro(){
+  const map = {};
+  ((CIE && CIE.detalle) || []).forEach(x => {
+    if (x.centro){
+      const o = map[x.centro] || (map[x.centro] = {centro: x.centro, libre: 0, lotes: 0, peds: new Set()});
+      o.libre += x.libre; o.lotes += x.lotes; o.peds.add(x.ped);
+    } else if (x.byCentro){
+      Object.keys(x.byCentro).forEach(c => {
+        const o = map[c] || (map[c] = {centro: c, libre: 0, lotes: 0, peds: new Set()});
+        o.libre += x.byCentro[c]; o.peds.add(x.ped);
+      });
+    }
+  });
+  return Object.values(map).sort((a, b) => b.libre - a.libre);
 }
 // ================== TAB RESUMEN ==================
 function renderResumen(){
@@ -1596,6 +1627,25 @@ function renderResumen(){
   } else {
     $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
     $('resAnio').innerHTML = '';
+  }
+  // Saldos W por consolidador y planta
+  if (CIE){
+    const sal = cieSaldosPorCentro();
+    if (sal.length){
+      let hs = '<table style="min-width:480px"><thead><tr><th>Consolidador / Planta</th><th class="num">Pedidos</th><th class="num">Q Lotes</th><th class="num">Saldo t</th></tr></thead><tbody>';
+      let st = 0, sq = 0;
+      const sp2 = new Set();
+      sal.forEach(o => {
+        st += o.libre; sq += o.lotes;
+        o.peds.forEach ? o.peds.forEach(p => sp2.add(p)) : null;
+        const esPlanta = /planta/i.test(o.centro);
+        hs += `<tr class="det"><td><span class="pill ${esPlanta ? 'bad' : 'warn'}">${esc(o.centro)}</span></td><td class="num">${nf0.format(o.peds.size || o.peds.length || 0)}</td><td class="num">${o.lotes ? nf0.format(o.lotes) : '—'}</td><td class="num"><b>${fmt(o.libre)}</b></td></tr>`;
+      });
+      hs += `<tr class="tot"><td>Stock total</td><td class="num">${nf0.format(sp2.size)}</td><td class="num">${nf0.format(sq)}</td><td class="num">${fmt(st)}</td></tr></tbody></table>`;
+      $('resSaldosW').innerHTML = hs;
+    } else $('resSaldosW').innerHTML = '<div class="empty">Sin saldos W vigentes ✅</div>';
+  } else {
+    $('resSaldosW').innerHTML = '<div class="empty">Sube el archivo Saldo W (pestaña Cierres) para ver este cuadro.</div>';
   }
   // Naves urgentes (por fecha corte documental)
   if (DET){
@@ -2629,8 +2679,13 @@ function buildExport(){
       cieRes.push(['Cierre ' + mm, r3(mi), r3(me), r3(ma2), r3(md), (mi > 0 ? Math.round(me / mi * 100) : 0) + '%', r3(mp)]);
     });
     out['Cierres resumen'] = cieRes;
-    out['Cierres detalle'] = [['Semana','Nave','Pais','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Motivo','EmbarqueD','Prox salida']]
-      .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).map(c => c + ' (' + r3(x.byCentro[c]) + ')').join(' · '), x.lotes, x.libre, x.obs, x.embd || '', x.prox ? 'SI' : 'NO']));
+    out['Cierres detalle'] = [['Semana','Centro','Nave','Pais','Pedido','Cliente','Q Lotes','Libre t','Motivo','EmbarqueD','Prox salida']]
+      .concat(CIE.detalle.filter(x => x.centro).map(x => [x.sem, x.centro, x.nave, x.pais, x.ped, x.cli, x.lotes, x.libre, x.obs, x.embd || '', x.prox ? 'SI' : 'NO']));
+    const salC = cieSaldosPorCentro();
+    if (salC.length){
+      out['Saldos por centro'] = [['Consolidador / Planta','Pedidos','Q Lotes','Saldo t']]
+        .concat(salC.map(o => [o.centro, o.peds.size || 0, o.lotes, r3(o.libre)]));
+    }
   }
   const fechasH = Object.keys(HIST).sort().reverse();
   if (fechasH.length){
@@ -2781,6 +2836,11 @@ function exportPDF(){
       const f = faltaAoa();
       if (f.length > 1) sections.push(['Embarques gestionados con falta de producción (por fecha de corte)', f]);
     }
+    if (CIE){
+      const salC = cieSaldosPorCentro();
+      if (salC.length) sections.push(['Saldos W por consolidador y planta', [['Consolidador / Planta','Pedidos','Q Lotes','Saldo t']]
+        .concat(salC.map(o => [o.centro, o.peds.size || 0, o.lotes, r3(o.libre)]))]);
+    }
     if (!sections.length) return toast('Aún no hay datos cargados');
     fname = 'resumen'; titulo = 'Resumen ejecutivo';
   } else if (MAIN === 'sim'){
@@ -2837,8 +2897,10 @@ function exportPDF(){
     }
     sections = [
       ['Resumen de saldos W por mes y semana', cieResP],
-      ['Detalle de saldos por pedido (última semana programada)', [['Sem','Nave','País','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Próx salida']]
-        .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).join(' · '), x.lotes, r3(x.libre), x.prox ? 'SI (' + x.embd + ')' : '']))]
+      ['Saldos por consolidador y planta', [['Consolidador / Planta','Pedidos','Q Lotes','Saldo t']]
+        .concat(cieSaldosPorCentro().map(o => [o.centro, o.peds.size || 0, o.lotes, r3(o.libre)]))],
+      ['Detalle de saldos por pedido y centro (última semana programada)', [['Sem','Centro','Nave','País','Pedido','Cliente','Q Lotes','Libre t','Próx salida']]
+        .concat(CIE.detalle.filter(x => x.centro).map(x => [x.sem, x.centro, x.nave, x.pais, x.ped, x.cli, x.lotes, r3(x.libre), x.prox ? 'SI (' + x.embd + ')' : '']))]
     ];
     fname = 'cierres'; titulo = 'Cierres de nave — saldos W';
   } else if (MAIN === 'stock'){
