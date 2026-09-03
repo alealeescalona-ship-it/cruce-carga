@@ -1496,7 +1496,6 @@ function renderCierres(){
     if (!porMes[x.mes]){ porMes[x.mes] = []; meses.push(x.mes); }
     porMes[x.mes].push(x);
   });
-  if (CIEM_OPEN.size === 0 && meses.length) CIEM_OPEN.add(meses[meses.length - 1]);   // ultimo mes abierto por defecto
   const pctPill = p => `<span class="pill ${p >= 0.9 ? 'ok' : (p >= 0.6 ? 'warn' : 'bad')}">${Math.round(p * 100)}%</span>`;
   let h = '<table style="min-width:640px"><thead><tr><th>Mes / Semana</th><th class="num">Tons Inicial</th><th class="num">Tons Embarcado</th><th class="num">Tons Actual</th><th class="num">Tons U. Dañadas</th><th class="num">% Embarcado</th><th class="num">Tons Próx. a Salir</th></tr></thead><tbody>';
   let ti = 0, te = 0, ta = 0, td2 = 0, tp = 0;
