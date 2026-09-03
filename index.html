@@ -1269,7 +1269,7 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
   const C = {nave: ci('nave'), centro: ci('centro consolidaror') >= 0 ? ci('centro consolidaror') : ci('centro consolidador'),
     ped: ci('pedido'), sem: ci('semana'), tne: ci('tons no embarcadas [tons]'), u2: ci('unid. no embarcadas [unid]2'),
     cons: ch.findIndex(h => h.includes('considerar')), obs: ci('observacion'), pais: ci('pais texto') >= 0 ? ci('pais texto') : ci('pais'),
-    cli: ci('nombre destinatario')};
+    cli: ci('nombre destinatario'), mes: ci('mes')};
   const bh = baseAoa[0].map(norm);
   const bi = n => bh.indexOf(n);
   const B = {ped: bi('documento'), ce: bi('ce.'), libre: bi('libre utiliz.'), embd: bi('embarqued'), lote: bi('lote')};
@@ -1303,16 +1303,18 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
     const o = pedMap[ped] || (pedMap[ped] = {ped, entradas: []});
     o.entradas.push({nave: String(a[C.nave] || '').trim(), sem, tne: numv(a[C.tne]), u2,
       obs: String(a[C.obs] || '').trim(), pais: String(a[C.pais] || '').trim(), cli: String(a[C.cli] || '').trim(),
-      centroCie: String(a[C.centro] == null ? '' : a[C.centro]).trim()});
+      centroCie: String(a[C.centro] == null ? '' : a[C.centro]).trim(),
+      mes: C.mes >= 0 ? String(a[C.mes] || '').trim() : ''});
   }
   // Detalle por pedido: ultima semana programada manda
   const detalle = [];
   const resMap = {};
-  const resFor = s => resMap[s] || (resMap[s] = {sem: s, inicial: 0, actual: 0, dan: 0, prox: 0});
+  const resFor = s => resMap[s] || (resMap[s] = {sem: s, mes: '', inicial: 0, actual: 0, dan: 0, prox: 0});
   Object.values(pedMap).forEach(p => {
     p.entradas.forEach(e => {
       const rr = resFor(e.sem);
       rr.inicial += e.tne;
+      if (e.mes && !rr.mes) rr.mes = e.mes;
       if (/DAÑAD|DANAD/i.test(e.obs)) rr.dan += e.tne;
     });
     const ult = p.entradas.reduce((a, b) => b.sem >= a.sem ? b : a);
@@ -1331,7 +1333,7 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
   detalle.sort((a, b) => (a.sem - b.sem) || b.libre - a.libre);
   const resumen = Object.values(resMap).sort((a, b) => a.sem - b.sem).map(rr2 => {
     const emb = Math.max(0, rr2.inicial - rr2.actual);
-    return {sem: rr2.sem, inicial: r3(rr2.inicial), embarcado: r3(emb), actual: r3(rr2.actual),
+    return {sem: rr2.sem, mes: rr2.mes || 'Sin mes', inicial: r3(rr2.inicial), embarcado: r3(emb), actual: r3(rr2.actual),
       dan: r3(rr2.dan), pct: rr2.inicial > 0 ? emb / rr2.inicial : 0, prox: r3(rr2.prox)};
   });
   CIE = {file: fname, fecha: hoyISO, resumen, detalle};
@@ -1468,6 +1470,8 @@ function setMain(m){
 }
 // ================== TAB CIERRES ==================
 const CIEF = {sem: '', nave: '', pais: '', centro: '', ord: 'sem'};
+const CIEM_OPEN = new Set();
+function cieMesToggle(m){ if (CIEM_OPEN.has(m)) CIEM_OPEN.delete(m); else CIEM_OPEN.add(m); renderCierres(); }
 function cieSet(campo, v){ CIEF[campo] = v; renderCierres(); }
 function renderCierres(){
   if (!CIE){
@@ -1477,17 +1481,36 @@ function renderCierres(){
     return;
   }
   $('cieNote').innerHTML = `Archivo <b>${esc(CIE.file)}</b> · subido el ${fdate(CIE.fecha)} · pedidos con diferencia al cierre (Unid. NO EMBARCADAS [UNID]2 &gt; 0, ¿Considerar? = SI) cruzados con la Base por lote (solo centros ${CENTROS_SALDO.join(', ')})`;
-  // Resumen semanal
-  let h = '<table style="min-width:640px"><thead><tr><th>Semana</th><th class="num">Tons Inicial</th><th class="num">Tons Embarcado</th><th class="num">Tons Actual</th><th class="num">Tons U. Dañadas</th><th class="num">% Embarcado</th><th class="num">Tons Próx. a Salir</th></tr></thead><tbody>';
-  let ti = 0, te = 0, ta = 0, td2 = 0, tp = 0;
+  // Resumen agrupado por MES (desplegable) -> semanas
+  const meses = [];
+  const porMes = {};
   CIE.resumen.forEach(x => {
-    ti += x.inicial; te += x.embarcado; ta += x.actual; td2 += x.dan; tp += x.prox;
-    const pctCls = x.pct >= 0.9 ? 'ok' : (x.pct >= 0.6 ? 'warn' : 'bad');
-    h += `<tr class="det"><td><b>Semana ${x.sem}</b></td><td class="num">${fmt(x.inicial)}</td><td class="num">${fmt(x.embarcado)}</td>` +
-      `<td class="num">${x.actual > 0.05 ? `<span class="neg"><b>${fmt(x.actual)}</b></span>` : fmt(x.actual)}</td>` +
-      `<td class="num">${x.dan > 0.05 ? fmt(x.dan) : '—'}</td>` +
-      `<td class="num"><span class="pill ${pctCls}">${Math.round(x.pct * 100)}%</span></td>` +
-      `<td class="num">${x.prox > 0.05 ? `<b>${fmt(x.prox)}</b>` : '—'}</td></tr>`;
+    if (!porMes[x.mes]){ porMes[x.mes] = []; meses.push(x.mes); }
+    porMes[x.mes].push(x);
+  });
+  if (CIEM_OPEN.size === 0 && meses.length) CIEM_OPEN.add(meses[meses.length - 1]);   // ultimo mes abierto por defecto
+  const pctPill = p => `<span class="pill ${p >= 0.9 ? 'ok' : (p >= 0.6 ? 'warn' : 'bad')}">${Math.round(p * 100)}%</span>`;
+  let h = '<table style="min-width:640px"><thead><tr><th>Mes / Semana</th><th class="num">Tons Inicial</th><th class="num">Tons Embarcado</th><th class="num">Tons Actual</th><th class="num">Tons U. Dañadas</th><th class="num">% Embarcado</th><th class="num">Tons Próx. a Salir</th></tr></thead><tbody>';
+  let ti = 0, te = 0, ta = 0, td2 = 0, tp = 0;
+  meses.forEach(mm => {
+    const g = porMes[mm];
+    let mi = 0, me = 0, ma2 = 0, md = 0, mp = 0;
+    g.forEach(x => { mi += x.inicial; me += x.embarcado; ma2 += x.actual; md += x.dan; mp += x.prox; });
+    ti += mi; te += me; ta += ma2; td2 += md; tp += mp;
+    const abierto = CIEM_OPEN.has(mm);
+    h += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="cieMesToggle('${esc(mm).replace(/'/g, "\\'")}')"><td><span class="caret">▾</span><b>Cierre ${esc(mm)}</b> <span class="cnt">· ${g.length} semanas</span></td>` +
+      `<td class="num"><b>${fmt(mi)}</b></td><td class="num"><b>${fmt(me)}</b></td>` +
+      `<td class="num">${ma2 > 0.05 ? `<span class="neg"><b>${fmt(ma2)}</b></span>` : `<b>${fmt(ma2)}</b>`}</td>` +
+      `<td class="num"><b>${md > 0.05 ? fmt(md) : '—'}</b></td>` +
+      `<td class="num">${pctPill(mi > 0 ? me / mi : 0)}</td>` +
+      `<td class="num"><b>${mp > 0.05 ? fmt(mp) : '—'}</b></td></tr>`;
+    if (abierto) g.forEach(x => {
+      h += `<tr class="det"><td style="padding-left:32px">Semana ${x.sem}</td><td class="num">${fmt(x.inicial)}</td><td class="num">${fmt(x.embarcado)}</td>` +
+        `<td class="num">${x.actual > 0.05 ? `<span class="neg"><b>${fmt(x.actual)}</b></span>` : fmt(x.actual)}</td>` +
+        `<td class="num">${x.dan > 0.05 ? fmt(x.dan) : '—'}</td>` +
+        `<td class="num">${pctPill(x.pct)}</td>` +
+        `<td class="num">${x.prox > 0.05 ? `<b>${fmt(x.prox)}</b>` : '—'}</td></tr>`;
+    });
   });
   h += `<tr class="tot"><td>Total</td><td class="num">${fmt(ti)}</td><td class="num">${fmt(te)}</td><td class="num">${fmt(ta)}</td><td class="num">${fmt(td2)}</td><td class="num">${ti > 0 ? Math.round(te / ti * 100) + '%' : '—'}</td><td class="num">${fmt(tp)}</td></tr></tbody></table>`;
   $('tblCieRes').innerHTML = h;
@@ -2595,8 +2618,17 @@ function buildExport(){
     out['Resumen stock grupos'] = resumenStockAoa();
   }
   if (CIE){
-    out['Cierres resumen'] = [['Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U Dañadas','% Embarcado','Tons Prox a Salir']]
-      .concat(CIE.resumen.map(x => ['Semana ' + x.sem, x.inicial, x.embarcado, x.actual, x.dan, Math.round(x.pct * 100) + '%', x.prox]));
+    const cieRes = [['Mes / Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U Dañadas','% Embarcado','Tons Prox a Salir']];
+    const mesesE = [];
+    const porMesE = {};
+    CIE.resumen.forEach(x => { if (!porMesE[x.mes]){ porMesE[x.mes] = []; mesesE.push(x.mes); } porMesE[x.mes].push(x); });
+    mesesE.forEach(mm => {
+      porMesE[mm].forEach(x => cieRes.push(['Semana ' + x.sem, x.inicial, x.embarcado, x.actual, x.dan, Math.round(x.pct * 100) + '%', x.prox]));
+      let mi = 0, me = 0, ma2 = 0, md = 0, mp = 0;
+      porMesE[mm].forEach(x => { mi += x.inicial; me += x.embarcado; ma2 += x.actual; md += x.dan; mp += x.prox; });
+      cieRes.push(['Cierre ' + mm, r3(mi), r3(me), r3(ma2), r3(md), (mi > 0 ? Math.round(me / mi * 100) : 0) + '%', r3(mp)]);
+    });
+    out['Cierres resumen'] = cieRes;
     out['Cierres detalle'] = [['Semana','Nave','Pais','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Motivo','EmbarqueD','Prox salida']]
       .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).map(c => c + ' (' + r3(x.byCentro[c]) + ')').join(' · '), x.lotes, x.libre, x.obs, x.embd || '', x.prox ? 'SI' : 'NO']));
   }
@@ -2666,7 +2698,7 @@ function addSheetTable(wb, name, aoa, ti){
     if (/( t$)|tons|ton |maule|valdivia|libre|remanente|peso|total t/.test(hs)) ws.getColumn(i + 1).numFmt = '#,##0.0';
   });
   ws.getRow(1).font = {bold: true};
-  body.forEach((r, bi) => { if (/^(Total|TOTAL|Stock Total)/.test(String(r[0] == null ? '' : r[0]))) ws.getRow(bi + 2).font = {bold: true}; });
+  body.forEach((r, bi) => { if (/^(Total|TOTAL|Stock Total|Cierre )/.test(String(r[0] == null ? '' : r[0]))) ws.getRow(bi + 2).font = {bold: true}; });
   ws.views = [{state: 'frozen', ySplit: 1}];
   return ws;
 }
@@ -2791,9 +2823,20 @@ function exportPDF(){
     fname = 'transporte'; titulo = 'Programa de transporte';
   } else if (MAIN === 'cie'){
     if (!CIE) return toast('Sube el archivo Saldo W primero');
+    const cieResP = [['Mes / Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U. Dañadas','% Embarcado','Tons Próx a Salir']];
+    {
+      const mesesP = [];
+      const porMesP = {};
+      CIE.resumen.forEach(x => { if (!porMesP[x.mes]){ porMesP[x.mes] = []; mesesP.push(x.mes); } porMesP[x.mes].push(x); });
+      mesesP.forEach(mm => {
+        porMesP[mm].forEach(x => cieResP.push(['Semana ' + x.sem, r3(x.inicial), r3(x.embarcado), r3(x.actual), r3(x.dan), Math.round(x.pct * 100) + '%', r3(x.prox)]));
+        let mi = 0, me = 0, ma2 = 0, md = 0, mp = 0;
+        porMesP[mm].forEach(x => { mi += x.inicial; me += x.embarcado; ma2 += x.actual; md += x.dan; mp += x.prox; });
+        cieResP.push(['Cierre ' + mm, r3(mi), r3(me), r3(ma2), r3(md), (mi > 0 ? Math.round(me / mi * 100) : 0) + '%', r3(mp)]);
+      });
+    }
     sections = [
-      ['Resumen semanal de saldos W', [['Semana','Tons Inicial','Tons Embarcado','Tons Actual','Tons U. Dañadas','% Embarcado','Tons Próx a Salir']]
-        .concat(CIE.resumen.map(x => ['Semana ' + x.sem, r3(x.inicial), r3(x.embarcado), r3(x.actual), r3(x.dan), Math.round(x.pct * 100) + '%', r3(x.prox)]))],
+      ['Resumen de saldos W por mes y semana', cieResP],
       ['Detalle de saldos por pedido (última semana programada)', [['Sem','Nave','País','Pedido','Cliente','Centro stock','Q Lotes','Libre t','Próx salida']]
         .concat(CIE.detalle.map(x => [x.sem, x.nave, x.pais, x.ped, x.cli, Object.keys(x.byCentro).join(' · '), x.lotes, r3(x.libre), x.prox ? 'SI (' + x.embd + ')' : '']))]
     ];
@@ -2858,7 +2901,7 @@ function exportPDF(){
         if (d.section !== 'body') return;
         const fila = aoa[d.row.index + 1];
         const c0 = String(fila[0] == null ? '' : fila[0]);
-        if (/^(Total|TOTAL|Stock Total)/.test(c0)){ d.cell.styles.fillColor = [222, 230, 240]; d.cell.styles.textColor = [30, 40, 55]; d.cell.styles.fontStyle = 'bold'; return; }
+        if (/^(Total|TOTAL|Stock Total|Cierre )/.test(c0)){ d.cell.styles.fillColor = [222, 230, 240]; d.cell.styles.textColor = [30, 40, 55]; d.cell.styles.fontStyle = 'bold'; return; }
         const pi = aoa[0].indexOf('%Total');
         if (pi >= 0){
           if (['Bloqueo de Crédito','Chile Directo','Semielaborado Redirigidos','No Gestionado'].includes(c0)){
