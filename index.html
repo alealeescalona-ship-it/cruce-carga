@@ -1690,7 +1690,8 @@ function renderFaltaCarga(){
   if (!el) return;
   if (!DET || !DET.falta){ el.innerHTML = '<div class="empty">Vuelve a subir el detalle para calcular esto.</div>'; return; }
   const refC = o => `<td class="mono">${o.ents && o.ents.length ? esc(o.ents.join(', ')) : '—'}</td><td class="mono">${o.trs && o.trs.length ? esc(o.trs.join(', ')) : '—'}</td>`;
-  const fal = DET.falta.slice(0, 60);
+  const hoyF = dateToISO(new Date());
+  const fal = DET.falta.filter(f => !f.fcd || f.fcd >= hoyF).slice(0, 60);   // fuera los cortes ya vencidos
   if (!fal.length){ el.innerHTML = '<div class="empty">Sin faltas de producción ✅</div>'; return; }
   let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Nave</th><th>Consolidador</th><th>Entrega</th><th>Transporte</th><th>Corte doc.</th><th class="num">Entrega t</th><th class="num">Producido t</th><th class="num">Falta t</th></tr></thead><tbody>';
   let tf = 0;
@@ -2840,8 +2841,9 @@ function resumenStockAoa(){
   return aoa;
 }
 function faltaAoa(){
+  const hoyF = dateToISO(new Date());
   return [['Pedido','Cliente','Nave','Consolidador','Entrega','Transporte','F corte doc','Entrega t','Producido t','Falta t']]
-    .concat((DET.falta || []).map(f => [f.ped, f.cli, f.nave, f.cons, (f.ents || []).join(', '), (f.trs || []).join(', '), f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
+    .concat((DET.falta || []).filter(f => !f.fcd || f.fcd >= hoyF).map(f => [f.ped, f.cli, f.nave, f.cons, (f.ents || []).join(', '), (f.trs || []).join(', '), f.fcd, r3(f.ge), r3(f.py), r3(f.falta)]));
 }
 function urgAoa(){
   return [['Nave','Consolidador','Stk Maximo','Alerta','F corte doc','Maule t','Valdivia t']]
