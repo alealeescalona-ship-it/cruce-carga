@@ -121,7 +121,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <span class="dchip miss" id="chipTrans" onclick="openUpload()">🚚 Transporte: sin datos</span>
       <span class="dchip miss" id="chipStk" onclick="openUpload()">🧱 073: sin datos</span>
       <button class="btn" onclick="openUpload()">⬆ Subir</button>
-      <button class="btn" onclick="exportExcel()" title="Libro Excel con todas las hojas">⬇ Excel</button>
+      <button class="btn" onclick="exportExcel(false)" title="Excel solo con las hojas de la pestaña actual">⬇ Excel</button>
+      <button class="btn" onclick="exportExcel(true)" title="Libro Excel completo con todas las hojas">⬇ Excel todo</button>
       <button class="btn" onclick="exportPDF()" title="PDF de la pestaña actual">⬇ PDF</button>
     </div>
     <span class="sub" id="subline">Sube tus archivos para armar el cruce automático.</span>
@@ -133,6 +134,12 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <p>Detecta cada tipo automáticamente, aunque vengan juntos en una misma planilla. Si subes varias 078 (ej. Maule y Valdivia por separado) en una misma tanda, se suman.</p>
     <button class="bigbtn" onclick="document.getElementById('fileInput').click()">Elegir archivos…</button>
     <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls" multiple style="display:none" onchange="handleFiles(this.files); this.value='';">
+    <div style="margin-top:12px">
+      <button class="btn" onclick="exportDatos()" title="Descarga un archivo .json con todo lo guardado (histórico 073, simulador, programa, checks) para llevarlo a otra PC">💾 Respaldar datos del panel</button>
+      <button class="btn" onclick="document.getElementById('impDatos').click()" title="Carga el archivo .json respaldado en otra PC">📂 Restaurar datos</button>
+      <input type="file" id="impDatos" accept=".json" style="display:none" onchange="importDatos(this.files[0]); this.value='';">
+    </div>
+    <p style="font-size:11.5px">Los datos quedan guardados en el navegador de <b>cada PC</b>. Para verlos en otro equipo: Respaldar aquí → llevar el archivo → Restaurar allá.</p>
     <div class="status" id="upstatus"></div>
     <p style="font-size:11.5px">Los archivos se procesan solo en tu navegador: no se suben a ningún servidor. Los datos quedan guardados en este equipo para la próxima visita.</p>
   </div>
@@ -2685,6 +2692,17 @@ function buildExport(){
     out['Stock 073'] = res;
     Object.keys(STK.centros).forEach(c => { out[('Antiguedad ' + STK.centros[c]).slice(0, 31)] = agingAoa(c); });
     out['Stock por año'] = agingAnualAoa();
+    // Carga antigua a nivel de pedido: año, centro, pedido, libre utilizacion
+    const ca = [['Año','Mes','Centro','Pedido','Pais','Cliente','Libre utiliz t']];
+    Object.keys(STK.centros).forEach(c => {
+      stkAging(c).forEach(o => {
+        const anio = o.key === '0000' ? 'sin código' : o.key.slice(0, 4);
+        Object.values(o.peds || {}).sort((x, y) => y.tot - x.tot).forEach(pd => {
+          ca.push([anio, o.lbl, STK.centros[c], pd.ped, pd.pais, pd.cli, r3(pd.tot)]);
+        });
+      });
+    });
+    if (ca.length > 1) out['Carga antigua'] = ca;
     const mkAparte = cat => {
       const aoa = [['Centro','Pais','Destinatario','Pedido','Nave','Fecha stk','Libre t']];
       Object.keys(STK.centros).forEach(c => {
@@ -2790,14 +2808,52 @@ function addSheetTable(wb, name, aoa, ti){
   ws.views = [{state: 'frozen', ySplit: 1}];
   return ws;
 }
-async function exportExcel(){
+// Hojas que corresponden a cada pestaña (para la descarga por pestaña)
+const HOJAS_TAB = {
+  resumen: n => ['Resumen stock grupos','Stock por año','Saldos por centro','Naves urgentes','Ready vs corte'].includes(n),
+  carga: n => ['Resumen gestionada','Resumen no gestionada','Gestionada','No gestionada','Falta produccion','Saldos contabilizados'].includes(n),
+  prio: n => n === 'Prioridades' || n === 'Naves urgentes',
+  stock: n => ['Stock 073','Stock por año','Carga antigua','Semielaborado SEMI','Stock P09'].includes(n) || n.startsWith('Antiguedad'),
+  sim: n => ['Simulador','Historico 073'].includes(n),
+  cie: n => ['Cierres resumen','Cierres detalle','Saldos por centro'].includes(n),
+  plan: n => ['Planificacion','Transporte','Despachos 078'].includes(n)
+};
+async function exportExcel(todo){
   const secs = buildExport();
-  const names = Object.keys(secs);
+  let names = Object.keys(secs);
   if (!names.length) return toast('Aún no hay datos cargados');
+  let suf = '';
+  if (!todo){
+    const f = HOJAS_TAB[MAIN];
+    const sel = f ? names.filter(f) : names;
+    if (sel.length){ names = sel; suf = '_' + MAIN; }
+    else return toast('Esta pestaña aún no tiene datos para exportar');
+  }
   const wb = new ExcelJS.Workbook();
   names.forEach((n, i) => addSheetTable(wb, n, secs[n], i));
   const buf = await wb.xlsx.writeBuffer();
-  saveFile('cruce_' + (DET ? DET.corte : dateToISO(new Date())) + '.xlsx', buf);
+  saveFile('cruce' + suf + '_' + (DET ? DET.corte : dateToISO(new Date())) + '.xlsx', buf);
+}
+// Respaldo / restauracion de todos los datos del panel (para verlos en otra PC)
+const LS_KEYS = ['cruceData3','cruceHist073','cruceSim','crucePlan3','cruceChecks','cruceCfg'];
+function exportDatos(){
+  const out = {panel: 'cruce-carga', fecha: dateToISO(new Date())};
+  LS_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v) out[k] = JSON.parse(v); } catch(e){} });
+  saveFile('cruce_datos_' + out.fecha + '.json', JSON.stringify(out));
+}
+function importDatos(file){
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const d = JSON.parse(rd.result);
+      if (d.panel !== 'cruce-carga') return toast('Ese archivo no es un respaldo del panel');
+      LS_KEYS.forEach(k => { if (d[k] !== undefined) lsSet(k, d[k]); });
+      toast('Datos restaurados (' + (d.fecha || '') + ') — recargando…');
+      setTimeout(() => location.reload(), 800);
+    } catch(e){ toast('No se pudo leer el respaldo: ' + e.message); }
+  };
+  rd.readAsText(file);
 }
 async function exportSeleccion(){
   if (!DET) return toast('Sube el detalle primero');
