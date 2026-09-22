@@ -285,10 +285,6 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     </div>
     <div class="secttl">Carga por consolidador — stock <span id="plName1"></span></div>
     <div class="tblbox"><div id="tblPlan1"></div></div>
-    <div class="secttl">📣 Demanda (va en el correo)</div>
-    <p class="note">Arma la tabla de demanda como la envías a plantas: destino, UT y nota de entrega (ej: "ENTREGA EL JUEVES"). Se guarda en este navegador y sale en el correo junto con las prioridades.</p>
-    <div class="summary"><span>Fecha de la demanda: <input class="cell" style="width:130px" type="date" id="demFecha" onchange="demSetFecha(this.value)"></span><button class="btn" onclick="demAddFila()">+ Agregar destino</button><button class="btn" onclick="demReset()">Reiniciar demanda</button></div>
-    <div class="tblbox"><div id="tblDem"></div></div>
     <div class="secttl closed">🚚 Programa transporte del día (OT-GDE, zona 1)</div>
     <p class="note" id="transNote" style="display:none"></p>
     <div class="tblbox" style="display:none"><div id="tblTrans"></div></div>
@@ -300,6 +296,10 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <button class="btn" onclick="resetPlan()">Limpiar programa de esta planta</button>
     </div>
     <div class="tblbox"><div id="tblPlan2"></div></div>
+    <div class="secttl">📣 Demanda (va en el correo)</div>
+    <p class="note">El programa de arriba te indica cuántas UT puedes despachar; con eso armas aquí la demanda como la envías a plantas: destino, UT y nota de entrega (ej: "ENTREGA EL JUEVES"). Se guarda en este navegador y sale en el correo junto con las prioridades.</p>
+    <div class="summary"><span>Fecha de la demanda: <input class="cell" style="width:130px" type="date" id="demFecha" onchange="demSetFecha(this.value)"></span><button class="btn" onclick="demAddFila()">+ Agregar destino</button><button class="btn" onclick="demReset()">Reiniciar demanda</button></div>
+    <div class="tblbox"><div id="tblDem"></div></div>
   </section>
 
   <footer>Panel de cruce logístico · los datos se procesan y guardan solo en tu navegador · marca ✓ cada línea revisada</footer>
@@ -1398,8 +1398,11 @@ function prio050Data(){
   const map = {};
   ((E050 && E050.rows) || []).forEach(r => {
     if (r.ma <= 0 && r.va <= 0) return;
-    const k = r.cons + '||' + r.fdest + '||' + r.nave;
+    // Misma nave con fechas en destino de la misma semana (martes a lunes): una sola fila, fecha mas cercana
+    const sem = r.fdest ? semanaMartes(r.fdest).key : '';
+    const k = r.cons + '||' + r.nave + '||' + sem;
     const o = map[k] || (map[k] = {cons: r.cons, fdest: r.fdest, nave: r.nave, ma: 0, va: 0, peds: []});
+    if (r.fdest && (!o.fdest || r.fdest < o.fdest)) o.fdest = r.fdest;
     o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va);
     const p0 = r.ped.split('/')[0];
     if (p0 && !o.peds.includes(p0)) o.peds.push(p0);
@@ -2488,8 +2491,11 @@ function prioData(){
   const rows = gPend();
   const map = {};
   rows.forEach(r => {
-    const k = r.cons + '||' + r.fcd + '||' + r.nave;
+    // Misma nave con cortes en la misma semana (martes a lunes): una sola fila, fecha mas cercana
+    const sem = r.fcd ? semanaMartes(r.fcd).key : '';
+    const k = r.cons + '||' + r.nave + '||' + sem;
     if (!map[k]) map[k] = {cons: r.cons, fcd: r.fcd, nave: r.nave, ma: 0, va: 0};
+    if (r.fcd && (!map[k].fcd || r.fcd < map[k].fcd)) map[k].fcd = r.fcd;
     map[k].ma += r.ma; map[k].va += r.va;
   });
   const list = Object.values(map);
