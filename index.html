@@ -28,22 +28,23 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "IBM Plex Sans
 /* ===== Cabecera ===== */
 header.top{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 16px;margin-bottom:14px}
 .brandbox{display:flex;flex-direction:column;gap:6px;min-width:260px}
-h1{font-size:21px;margin:0;letter-spacing:-.01em;text-wrap:balance}
-h1::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--brand);box-shadow:var(--glow-fuerte);margin-right:9px;vertical-align:2px}
+h1{font-size:30px;margin:0;font-weight:300;letter-spacing:-.01em;text-wrap:balance}
+.cmpc{font-weight:600;font-size:16px;color:#94a3b8;letter-spacing:.04em;margin-left:12px;white-space:nowrap}
+.cmpc svg{vertical-align:7px;margin-left:1px}
 .sub{color:var(--muted);font-size:12.5px}
-.toolbar{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;align-items:center;background:rgba(255,255,255,.75);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:7px 9px;box-shadow:var(--shadow)}
+.toolbar{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;align-items:center;padding-top:6px}
 .chipbar{display:flex;gap:6px;flex-wrap:wrap;width:100%;align-items:center}
-.dchip{display:inline-flex;align-items:center;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 11px;font-size:11.5px;cursor:pointer;color:var(--muted);transition:border-color .15s}
+.dchip{display:inline-flex;align-items:center;gap:5px;background:#e9edf2;border:1px solid transparent;border-radius:8px;padding:5px 12px;font-size:11.5px;cursor:pointer;color:#475569;transition:border-color .15s}
 .dchip b{color:var(--ink)}
-.dchip.ok{border-color:rgba(0,168,107,.45);color:var(--ink)}
+.dchip.ok{background:#fff;border-color:var(--line);color:var(--ink)}
 .dchip.ok::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--brand);box-shadow:var(--glow)}
-.dchip.miss{border-style:dashed}
+.dchip.miss{border:1px dashed #cbd5e1;background:transparent}
 .dchip:hover{border-color:var(--brand)}
 /* ===== Pestañas principales (píldoras) ===== */
-.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px;box-shadow:var(--shadow)}
-.tab{border:1px solid transparent;background:transparent;color:var(--muted);padding:8px 15px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit;transition:all .15s}
-.tab:hover{color:var(--ink);background:var(--chip)}
-.tab.active{background:var(--brand);border-color:var(--brand);color:var(--brand-ink);box-shadow:var(--glow-fuerte)}
+.tabs{display:flex;gap:4px;align-items:flex-end;flex-wrap:wrap;background:#eceff3;border-bottom:1px solid var(--line);padding:6px 12px 0;margin:-18px -16px 16px}
+.tab{border:1px solid transparent;border-bottom:0;background:transparent;color:var(--muted);padding:9px 15px;border-radius:9px 9px 0 0;cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit;transition:background .15s,color .15s}
+.tab:hover{color:var(--ink);background:#f4f6f8}
+.tab.active{background:var(--panel);border-color:var(--line);color:var(--ink);box-shadow:inset 0 -3px 0 var(--brand),0 -2px 6px rgba(15,23,42,.05)}
 .tab:focus-visible,.btn:focus-visible,.subtab:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 /* ===== Zona de subida ===== */
 .upzone{background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;margin-bottom:14px;box-shadow:var(--shadow)}
@@ -56,7 +57,9 @@ h1::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50
 /* ===== Tarjetas KPI con anillos ===== */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);transition:border-color .15s}
-.kpi.kpr{display:flex;align-items:center;gap:12px}
+.kpi.kpr{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.kpi.hl{background:linear-gradient(135deg,#fffdf6,#fdf3e3);border-color:#f0d6a8;box-shadow:0 0 12px rgba(217,119,6,.13),var(--shadow)}
+.seclbl{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#475569;margin:2px 0 8px}
 .kpi:hover{border-color:rgba(0,168,107,.4)}
 .kpi .ring{flex:none}
 .kpi .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
@@ -75,8 +78,8 @@ h1::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50
 .filters input[type=text],.filters select,.ctrl select,.ctrl input[type=text]{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:12.5px;font-family:inherit;transition:border-color .15s}
 .filters input[type=text]{flex:1;min-width:170px}
 .filters input[type=text]:focus,.filters select:focus{border-color:var(--brand);box-shadow:var(--glow)}
-.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;font-weight:500;transition:all .15s}
-.btn:hover{border-color:var(--brand);color:var(--ok-ink);box-shadow:var(--glow)}
+.btn{background:#e9eff5;border:1px solid transparent;color:#334155;border-radius:9px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;font-weight:500;transition:all .15s}
+.btn:hover{background:#fff;border-color:var(--brand);color:var(--ok-ink);box-shadow:var(--glow)}
 .btn b{font-weight:700}
 /* ===== Resumen integrado a la tabla ===== */
 .summary{display:flex;flex-wrap:wrap;gap:5px 18px;background:var(--strip);border:0;border-bottom:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 14px;margin:0;font-size:12.5px;color:#334155}
@@ -91,6 +94,8 @@ section > .summary, #sec_sim .summary, #sec_plan .summary{border:1px solid var(-
 table{border-collapse:collapse;width:100%;min-width:760px}
 th{position:sticky;top:0;background:var(--panel);z-index:1;text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:9px 11px;border-bottom:2px solid var(--line);white-space:nowrap;font-weight:600}
 td{padding:7px 11px;border-bottom:1px solid #eef2f6;vertical-align:top;font-size:13px}
+th:not(:last-child),td:not(:last-child){border-right:1px solid #f0f4f8}
+.z{color:#c2410c}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 td.num{font-family:"IBM Plex Mono",Consolas,monospace;font-size:12.5px}
 tr.det:nth-child(even) td{background:var(--row-alt)}
@@ -114,8 +119,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 footer{margin:16px 0 6px;color:var(--muted);font-size:11.5px;text-align:center}
 .note{color:var(--muted);font-size:12px;margin:0 0 10px}
 .secttl{font-size:14.5px;font-weight:700;margin:18px 0 8px;cursor:pointer;user-select:none;letter-spacing:-.01em}
-.secttl::before{content:'▾ ';color:var(--brand);font-size:11px}
-.secttl.closed::before{content:'▸ '}
+.secttl::before{content:'− ';color:var(--brand);font-weight:800}
+.secttl.closed::before{content:'› '}
 .secttl:hover{color:var(--ok-ink)}
 td input.cell,.cfg input,.summary input.cell{background:var(--edit-bg);border:1px solid var(--edit-line);border-radius:7px;padding:5px 7px;font:12.5px "IBM Plex Mono",Consolas,monospace;color:var(--ink);text-align:right}
 td input.cell{width:80px}
@@ -127,19 +132,29 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 #toast.show{opacity:.97}
 .neg{color:var(--bad-ink)}
 .autohint{font-size:11px;color:var(--muted);display:block;margin-top:2px}
-@media (max-width:640px){ h1{font-size:17px} .kpi .val{font-size:17px} .toolbar{margin-left:0} }
+@media (max-width:640px){ h1{font-size:21px} .kpi .val{font-size:17px} .toolbar{margin-left:0} .tabs{margin:-18px -16px 14px} }
 </style>
 <div class="wrap">
+  <div class="tabs" id="mainTabs" style="display:none">
+    <button class="tab" id="mt_resumen" onclick="setMain('resumen')">⭐ Resumen</button>
+    <button class="tab active" id="mt_carga" onclick="setMain('carga')">📦 Carga</button>
+    <button class="tab" id="mt_prio" onclick="setMain('prio')">🚢 Prioridades naves</button>
+    <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
+    <button class="tab" id="mt_sim" onclick="setMain('sim')">🧮 Simulador</button>
+    <button class="tab" id="mt_cie" onclick="setMain('cie')">⚓ Cierres</button>
+    <button class="tab" id="mt_plan" onclick="setMain('plan')">📋 Planificación</button>
+  </div>
+
   <header class="top">
     <div class="brandbox">
-      <h1>Cruce Carga Marítima — Maule / Valdivia</h1>
+      <h1>Cruce Carga Marítima — Maule / Valdivia<span class="cmpc">cmpc<svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 C4 9 9 4 20 4 C20 15 15 20 4 20 Z" style="fill:#00a86b"/><path d="M6 18 C10 13 14 9 18 6" fill="none" stroke-width="1.4" style="stroke:#e6f7f0"/></svg></span></h1>
       <span class="sub" id="subline">Sube tus archivos para armar el cruce automático.</span>
     </div>
     <div class="toolbar">
       <button class="btn" onclick="openUpload()">⬆ Subir</button>
-      <button class="btn" onclick="exportExcel(false)" title="Excel solo con las hojas de la pestaña actual">⬇ Excel</button>
-      <button class="btn" onclick="exportExcel(true)" title="Libro Excel completo con todas las hojas">⬇ Excel todo</button>
-      <button class="btn" onclick="exportPDF()" title="PDF de la pestaña actual">⬇ PDF</button>
+      <button class="btn" onclick="exportExcel(false)" title="Excel solo con las hojas de la pestaña actual">📗 Excel</button>
+      <button class="btn" onclick="exportExcel(true)" title="Libro Excel completo con todas las hojas">📗 Excel todo</button>
+      <button class="btn" onclick="exportPDF()" title="PDF de la pestaña actual">📕 PDF</button>
     </div>
     <div class="chipbar">
       <span class="dchip miss" id="chipDet" onclick="openUpload()">📄 Detalle: sin datos</span>
@@ -166,18 +181,9 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <p style="font-size:11.5px">Los archivos se procesan solo en tu navegador: no se suben a ningún servidor. Los datos quedan guardados en este equipo para la próxima visita.</p>
   </div>
 
-  <div class="tabs" id="mainTabs" style="display:none">
-    <button class="tab" id="mt_resumen" onclick="setMain('resumen')">⭐ Resumen</button>
-    <button class="tab active" id="mt_carga" onclick="setMain('carga')">📦 Carga</button>
-    <button class="tab" id="mt_prio" onclick="setMain('prio')">🚢 Prioridades naves</button>
-    <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
-    <button class="tab" id="mt_sim" onclick="setMain('sim')">🧮 Simulador</button>
-    <button class="tab" id="mt_cie" onclick="setMain('cie')">⚓ Cierres</button>
-    <button class="tab" id="mt_plan" onclick="setMain('plan')">📋 Planificación</button>
-  </div>
-
   <!-- ============ TAB RESUMEN ============ -->
   <section id="sec_resumen" style="display:none">
+    <div class="seclbl">KPI</div>
     <div class="kpis" id="resKpis"></div>
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
@@ -1548,6 +1554,13 @@ function refreshAll(){
   setMain(MAIN);
 }
 
+function deco(t){
+  const v = t === 'radar' || t === 'dotsWarn' ? '180,83,9' : '0,168,107';
+  const s = `<svg class="ring" width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">`;
+  if (t === 'rip') return s + [8, 14, 20].map((r, i) => `<circle cx="23" cy="23" r="${r}" fill="none" stroke-width="2" style="stroke:rgba(${v},${(0.55 - i * 0.17).toFixed(2)})"/>`).join('') + `<circle cx="23" cy="23" r="3" style="fill:rgba(${v},.8)"/></svg>`;
+  if (t === 'radar') return s + `<circle cx="23" cy="23" r="20" fill="none" stroke-width="2" style="stroke:rgba(${v},.25)"/><circle cx="23" cy="23" r="12" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/><path d="M23 23 L23 3 A20 20 0 0 1 40.3 13 Z" style="fill:rgba(${v},.28)"/><circle cx="23" cy="23" r="3" style="fill:rgba(${v},.6)"/></svg>`;
+  return s + `<path d="M8 33 L20 15 L30 25 L39 9" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/>` + [[8,33],[20,15],[30,25],[39,9]].map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" style="fill:rgba(${v},.7)"/>`).join('') + '</svg>';
+}
 function ring(pct){
   const r = 15.9, c = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, pct || 0));
@@ -1562,7 +1575,7 @@ function kpis(){
   nRows().forEach(r => { s.N.ma += r.ma; s.N.va += r.va; s.N.n++; });
   const tG = s.G.ma + s.G.va, tN = s.N.ma + s.N.va;
   const card = (cls, pct, tip, lbl, val, det) =>
-    `<div class="kpi kpr ${cls}" title="${tip}">${ring(pct)}<div><div class="lbl">${lbl}</div><div class="val">${fmt(val)} t</div><div class="det">${det}</div></div></div>`;
+    `<div class="kpi kpr ${cls}" title="${tip}"><div><div class="lbl">${lbl}</div><div class="val">${fmt(val)} t</div><div class="det">${det}</div></div>${ring(pct)}</div>`;
   $('kpis').innerHTML =
     card('g', tG ? s.G.ma / tG * 100 : 0, 'Participación de Maule en el total gestionado', 'Gestionada · Maule', s.G.ma, `${s.G.n} posiciones (pend.)`) +
     card('g', tG ? s.G.va / tG * 100 : 0, 'Participación de Valdivia en el total gestionado', 'Gestionada · Valdivia', s.G.va, 'con nave asignada') +
@@ -1692,16 +1705,16 @@ function renderResumen(){
     let gm = 0, gv = 0, nm = 0, nv = 0;
     gPend().forEach(r => { gm += r.ma; gv += r.va; });
     nRows().forEach(r => { nm += r.ma; nv += r.va; });
-    k += `<div class="kpi g"><div class="lbl">Carga gestionada</div><div class="val">${fmt(gm + gv)} t</div><div class="det">Maule ${fmt(gm)} · Valdivia ${fmt(gv)}</div></div>`;
-    k += `<div class="kpi n"><div class="lbl">Carga no gestionada</div><div class="val">${fmt(nm + nv)} t</div><div class="det">Maule ${fmt(nm)} · Valdivia ${fmt(nv)}</div></div>`;
+    k += `<div class="kpi kpr g"><div><div class="lbl">Carga gestionada</div><div class="val">${fmt(gm + gv)} t</div><div class="det">Maule ${fmt(gm)} · Valdivia ${fmt(gv)}</div></div>${deco('rip')}</div>`;
+    k += `<div class="kpi kpr n hl"><div><div class="lbl">Carga no gestionada</div><div class="val">${fmt(nm + nv)} t</div><div class="det">Maule ${fmt(nm)} · Valdivia ${fmt(nv)}</div></div>${deco('radar')}</div>`;
   }
   ['Maule','Valdivia'].forEach(pl => {
     const pc = planCalc(pl);
     let sp = 0, sd = 0;
     pc.rows.forEach(x => { sp += x.prog; sd += x.desp; });
-    if (sp > 0 || sd > 0) k += `<div class="kpi"><div class="lbl">UT ${pl}</div><div class="val">${fmtU(sd)} / ${fmtU(sp)}</div><div class="det">despachadas / programadas</div></div>`;
+    if (sp > 0 || sd > 0) k += `<div class="kpi kpr" title="Avance del día: UT despachadas sobre programadas"><div><div class="lbl">UT ${pl}</div><div class="val">${fmtU(sd)} / ${fmtU(sp)}</div><div class="det">despachadas / programadas</div></div>${ring(sp > 0 ? sd / sp * 100 : 0)}</div>`;
   });
-  if (DET && DET.alert) k += `<div class="kpi ${DET.alert.length ? 'n' : 'g'}"><div class="lbl">Stock repartido</div><div class="val">${DET.alert.length}</div><div class="det">embarques en 2+ consolidadores</div></div>`;
+  if (DET && DET.alert) k += `<div class="kpi kpr ${DET.alert.length ? 'n' : 'g'}"><div><div class="lbl">Stock repartido</div><div class="val">${DET.alert.length}</div><div class="det">embarques en 2+ consolidadores</div></div>${deco(DET.alert.length ? 'dotsWarn' : 'dots')}</div>`;
   $('resKpis').innerHTML = k || '<div class="empty">Sube el detalle de cartulinas para ver el resumen de carga.</div>';
   // Stock por grupo (sin desgloses)
   if (STK){
@@ -1715,10 +1728,10 @@ function renderResumen(){
     });
     ['Marítimo','Terrestre Internacional','Chile Directo','Chile Bodega Nacional'].forEach(gr => {
       let t = 0;
-      h += `<tr class="det"><td><b>${gr}</b></td>` + centros.map(c => { t += G[c][gr]; return `<td class="num">${nf0.format(G[c][gr])}</td>`; }).join('') + (centros.length > 1 ? `<td class="num"><b>${nf0.format(t)}</b></td>` : '') + '</tr>';
+      h += `<tr class="det"><td><b>${gr}</b></td>` + centros.map(c => { t += G[c][gr]; return `<td class="num">${G[c][gr] > 0.5 ? nf0.format(G[c][gr]) : '<span class="z">0</span>'}</td>`; }).join('') + (centros.length > 1 ? `<td class="num"><b>${nf0.format(t)}</b></td>` : '') + '</tr>';
     });
     let tt = 0;
-    h += `<tr class="tot"><td>Total</td>` + centros.map(c => { const s = Object.values(G[c]).reduce((a, b) => a + b, 0); tt += s; return `<td class="num">${nf0.format(s)}</td>`; }).join('') + (centros.length > 1 ? `<td class="num">${nf0.format(tt)}</td>` : '') + '</tr>';
+    h += `<tr class="tot"><td>Total</td>` + centros.map(c => { const s = Object.values(G[c]).reduce((a, b) => a + b, 0); tt += s; return `<td class="num">${s > 0.5 ? nf0.format(s) : '<span class="z">0</span>'}</td>`; }).join('') + (centros.length > 1 ? `<td class="num">${nf0.format(tt)}</td>` : '') + '</tr>';
     h += '</tbody></table>';
     $('resStock').innerHTML = h;
     // Por año del pedido (desplegable: año -> meses por centro)
