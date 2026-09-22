@@ -19,7 +19,7 @@
   --chip:#eef2f6; --strip:#e2e8f0; --row-alt:#f8fafc; --row-hover:#effaf5; --done:#94a3b8;
   --shadow:0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
   --edit-bg:#fffbeb; --edit-line:#f0dc9a;
-  --ch1:#0b8066; --ch2:#b3362a;
+  --ch1:#0b8066; --ch2:#64748b;
 }
 *{box-sizing:border-box}
 html{scrollbar-color:#cbd5e1 var(--bg)}
@@ -60,6 +60,13 @@ h1{font-size:30px;margin:0;font-weight:300;letter-spacing:-.01em;text-wrap:balan
 .kpi.kpr{display:flex;align-items:center;gap:12px;justify-content:space-between}
 .kpi.hl{background:linear-gradient(135deg,#fffdf6,#fdf3e3);border-color:#f0d6a8;box-shadow:0 0 12px rgba(217,119,6,.13),var(--shadow)}
 .seclbl{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#475569;margin:2px 0 8px}
+.cols2{display:grid;grid-template-columns:minmax(300px,5fr) minmax(300px,6fr);gap:12px;align-items:start}
+@media (max-width:940px){ .cols2{grid-template-columns:1fr} }
+.chsel{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;background:var(--ok-bg);border:1px solid rgba(0,168,107,.35);border-radius:10px;padding:7px 12px;margin-bottom:8px;font-size:12.5px;box-shadow:var(--glow)}
+.chsel b{font-family:"IBM Plex Mono",Consolas,monospace}
+.anio-pill{border:1px solid var(--line);background:var(--chip);color:var(--muted);border-radius:999px;padding:3px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.anio-pill:hover{color:var(--ink);border-color:var(--brand)}
+.anio-pill.active{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:var(--glow)}
 .kpi:hover{border-color:rgba(0,168,107,.4)}
 .kpi .ring{flex:none}
 .kpi .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
@@ -188,7 +195,10 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
     <div class="secttl">Stock 073 por año del pedido</div>
-    <div class="tblbox"><div id="resAnio"></div></div>
+    <div class="cols2">
+      <div class="tblbox"><div id="resAnio"></div></div>
+      <div class="tblbox" style="padding:12px"><div id="resAnioChart"></div></div>
+    </div>
     <div class="secttl">⚓ Saldos W por consolidador y planta</div>
     <div class="tblbox"><div id="resSaldosW"></div></div>
     <div class="secttl">📦 Toneladas gestionadas por tipo — Pila / Rollo (archivo 050)</div>
@@ -203,7 +213,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
   <!-- ============ TAB SIMULADOR ============ -->
   <section id="sec_sim" style="display:none">
     <p class="note">Muestra <b>desde el día 1 del mes en curso</b> hasta 3 semanas adelante. Los días donde subiste el 073 quedan <b>anclados al stock real</b> (marcados <span class="pill ok">073</span>) y la cadena continúa desde ahí. Escribe la <b>producción diaria</b> (general o por día), las <b>UT</b> por día y el <b>Stock U</b> (general o por día); Despacho = UT × ton/UT, Variación = despacho − producción, Stock W Final = inicial − variación, Total = final + Stock U.</p>
-    <div class="subtabs" id="simCentros"></div>
+    <div class="ctrl"><div class="subtabs" id="simCentros"></div></div>
     <div class="summary" id="simIni"></div>
     <div class="tblbox"><div id="tblSim"></div></div>
     <div class="secttl">Histórico stock 073</div>
@@ -250,7 +260,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
   <!-- ============ TAB PRIORIDADES ============ -->
   <section id="sec_prio" style="display:none">
     <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = Stk Máximo entre hoy y 3 días más; <b>VENCIDA ⛔</b> = Stk Máximo ya pasado.</p>
-    <div class="filters">
+    <div class="ctrl"><div class="filters">
       <select id="fPCons" onchange="renderPrio()"></select>
       <select id="fPNave" onchange="renderPrio()"></select>
       <select id="fPUrg" onchange="renderPrio()">
@@ -263,9 +273,8 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
         <option value="nave">Orden: nave</option>
         <option value="stk">Orden: stk máximo</option>
       </select>
-      <span style="flex:1"></span>
-      <button class="btn" onclick="copyPrio()">📋 Copiar para enviar a plantas</button>
-    </div>
+      <button class="btn spacer" onclick="copyPrio()">📋 Copiar para enviar a plantas</button>
+    </div></div>
     <div class="tblbox"><div id="tblPrio"></div></div>
     <div class="secttl">📌 Prioridades embarques (archivo 050)</div>
     <p class="note">Del archivo 050: consolidador (Centro Destino) → nave → <b>Fecha en Destino</b>; <b>Stk Máx = fecha en destino + 3 días</b> (si cae fin de semana, queda el viernes). Pesos en planta topados al Peso Solicitud del ítem.</p>
@@ -277,7 +286,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
   <!-- ============ TAB STOCK 073 ============ -->
   <section id="sec_stock" style="display:none">
     <p class="note" id="stockNote"></p>
-    <div class="subtabs" id="stkCentros"></div>
+    <div class="ctrl"><div class="subtabs" id="stkCentros"></div></div>
     <div class="kpis" id="stkKpis"></div>
     <div class="secttl">Stock W en <span id="stkCentroNom"></span></div>
     <div class="tblbox"><div id="tblStock"></div></div>
@@ -303,13 +312,14 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <!-- ============ TAB PLANIFICACION ============ -->
   <section id="sec_plan" style="display:none">
-    <div class="subtabs">
-      <span style="font-weight:700">Planta:</span>
-      <button class="subtab active" id="pl_Maule" onclick="setPlanta('Maule')">Maule</button>
-      <button class="subtab" id="pl_Valdivia" onclick="setPlanta('Valdivia')">Valdivia</button>
-      <span style="margin-left:auto"></span>
-      <span class="cfg" style="margin:0">⚙️ t/UT plan <input type="number" id="cfgPlan" step="0.5" min="1" onchange="cfgChange()"> · t/UT desp <input type="number" id="cfgDesp" step="0.5" min="1" onchange="cfgChange()"></span>
-    </div>
+    <div class="ctrl"><div class="filters">
+      <div class="subtabs">
+        <span style="font-weight:700;padding:0 6px">Planta:</span>
+        <button class="subtab active" id="pl_Maule" onclick="setPlanta('Maule')">Maule</button>
+        <button class="subtab" id="pl_Valdivia" onclick="setPlanta('Valdivia')">Valdivia</button>
+      </div>
+      <span class="cfg spacer" style="margin:0;border:0;box-shadow:none;padding:0 4px">⚙️ t/UT plan <input type="number" id="cfgPlan" step="0.5" min="1" onchange="cfgChange()"> · t/UT desp <input type="number" id="cfgDesp" step="0.5" min="1" onchange="cfgChange()"></span>
+    </div></div>
     <div class="secttl">Carga por consolidador — stock <span id="plName1"></span></div>
     <div class="tblbox"><div id="tblPlan1"></div></div>
     <div class="secttl closed">🚚 Programa transporte del día (OT-GDE, zona 1)</div>
@@ -317,11 +327,11 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <div class="tblbox" style="display:none"><div id="tblTrans"></div></div>
     <div class="secttl">Programa del día vs despachado — <span id="plName2"></span></div>
     <p class="note" id="planNote"></p>
-    <div class="subtabs">
+    <div class="ctrl"><div class="filters">
       <button class="btn" onclick="copyCorreo()"><b>📧 Copiar correo para plantas</b></button>
       <button class="btn" id="btnAuto" onclick="usarTransporte()" style="display:none">↺ Usar programa transporte (quitar ajustes)</button>
-      <button class="btn" onclick="resetPlan()">Limpiar programa de esta planta</button>
-    </div>
+      <button class="btn spacer" onclick="resetPlan()">Limpiar programa de esta planta</button>
+    </div></div>
     <div class="tblbox"><div id="tblPlan2"></div></div>
     <div class="secttl">📣 Demanda (va en el correo)</div>
     <p class="note">El programa de arriba te indica cuántas UT puedes despachar; con eso armas aquí la demanda como la envías a plantas: destino, UT y nota de entrega (ej: "ENTREGA EL JUEVES"). Se guarda en este navegador y sale en el correo junto con las prioridades.</p>
@@ -1561,12 +1571,14 @@ function deco(t){
   if (t === 'radar') return s + `<circle cx="23" cy="23" r="20" fill="none" stroke-width="2" style="stroke:rgba(${v},.25)"/><circle cx="23" cy="23" r="12" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/><path d="M23 23 L23 3 A20 20 0 0 1 40.3 13 Z" style="fill:rgba(${v},.28)"/><circle cx="23" cy="23" r="3" style="fill:rgba(${v},.6)"/></svg>`;
   return s + `<path d="M8 33 L20 15 L30 25 L39 9" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/>` + [[8,33],[20,15],[30,25],[39,9]].map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" style="fill:rgba(${v},.7)"/>`).join('') + '</svg>';
 }
-function ring(pct){
+const RING_TONOS = {brand: ['0,168,107', 'var(--brand)'], warn: ['180,83,9', '#b45309'], bad: ['185,28,28', '#b91c1c'], gray: ['100,116,139', '#64748b']};
+function ring(pct, tono){
+  const tn = RING_TONOS[tono || 'brand'] || RING_TONOS.brand;
   const r = 15.9, c = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, pct || 0));
   return `<svg class="ring" width="46" height="46" viewBox="0 0 40 40" role="img" aria-label="${p.toFixed(0)}%">` +
     `<circle cx="20" cy="20" r="${r}" fill="none" stroke-width="4" style="stroke:var(--line)"/>` +
-    `<circle cx="20" cy="20" r="${r}" fill="none" stroke-width="4" stroke-linecap="round" stroke-dasharray="${(p * c / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 20 20)" style="stroke:var(--brand);filter:drop-shadow(0 0 3px rgba(0,168,107,.45))"/>` +
+    `<circle cx="20" cy="20" r="${r}" fill="none" stroke-width="4" stroke-linecap="round" stroke-dasharray="${(p * c / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 20 20)" style="stroke:${tn[1]};filter:drop-shadow(0 0 3px rgba(${tn[0]},.45))"/>` +
     `<text x="20" y="20.5" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="700" style="fill:var(--ink);font-family:'IBM Plex Mono',Consolas,monospace">${p.toFixed(0)}%</text></svg>`;
 }
 function kpis(){
@@ -1768,9 +1780,11 @@ function renderResumen(){
     });
     ha += `<tr class="tot"><td colspan="2">Total</td><td class="num">${nf0.format(aTb)}</td><td class="num">${nf0.format(aTp)}</td><td class="num">${nf0.format(aTs)}</td><td class="num">${nf0.format(aTt)}</td></tr></tbody></table>`;
     $('resAnio').innerHTML = ha;
+    $('resAnioChart').innerHTML = resAnioChartHTML(mesesPorAnio, ordenAnios);
   } else {
     $('resStock').innerHTML = '<div class="empty">Sube el 073 para ver el stock por grupo.</div>';
     $('resAnio').innerHTML = '';
+    $('resAnioChart').innerHTML = '';
   }
   // Saldos W por consolidador y planta
   if (CIE){
@@ -2092,8 +2106,73 @@ const AGEM_OPEN = new Set();
 function ageToggle(a){ if (AGE_OPEN.has(a)) AGE_OPEN.delete(a); else AGE_OPEN.add(a); renderStock(); }
 function ageMesToggle(k){ if (AGEM_OPEN.has(k)) AGEM_OPEN.delete(k); else AGEM_OPEN.add(k); renderStock(); }
 const RESA_OPEN = new Set();
-function resAnioToggle(a){ if (RESA_OPEN.has(a)) RESA_OPEN.delete(a); else RESA_OPEN.add(a); renderResumen(); }
+function resAnioToggle(a){
+  if (RESA_OPEN.has(a)) RESA_OPEN.delete(a);
+  else { RESA_OPEN.add(a); if (a !== 'sin código'){ RESCH_ANIO = a; RESCH_MES = ''; } }
+  renderResumen();
+}
+// Grafico didactico del Resumen: meses del año seleccionado (barras por gestionar/sin entrega + linea stock total)
+let RESCH_ANIO = '', RESCH_MES = '';
+function resChAnio(a){ RESCH_ANIO = a; RESCH_MES = ''; renderResumen(); }
+function resChMes(k){ RESCH_MES = RESCH_MES === k ? '' : k; renderResumen(); }
+function mesLbl(k){ return (MES_NOM[+k.slice(5, 7)] || k) + ' ' + k.slice(0, 4); }
+function resAnioChartHTML(mesesPorAnio, ordenAnios){
+  const anios = ordenAnios.filter(a => a !== 'sin código');
+  if (!anios.length) return '<div class="empty">Sin años con código de pedido.</div>';
+  const anioAct = String(new Date().getFullYear());
+  if (!anios.includes(RESCH_ANIO)) RESCH_ANIO = anios.includes(anioAct) ? anioAct : anios[anios.length - 1];
+  const mm = {};
+  (mesesPorAnio[RESCH_ANIO] || []).forEach(o => {
+    const e = mm[o.key] || (mm[o.key] = {key: o.key, bloq: 0, porg: 0, sine: 0, tot: 0});
+    e.bloq += o.bloq; e.porg += o.porg; e.sine += o.sine; e.tot += o.tot;
+  });
+  const meses = Object.values(mm).sort((a, b) => a.key.localeCompare(b.key));
+  if (RESCH_MES && !mm[RESCH_MES]) RESCH_MES = '';
+  let s = '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
+    anios.map(a => `<button class="anio-pill ${a === RESCH_ANIO ? 'active' : ''}" onclick="resChAnio('${a}')">${a}</button>`).join('') +
+    '<span class="prog" style="font-size:11px;margin-left:auto">toca una barra para aislar el mes</span></div>';
+  const selO = RESCH_MES ? mm[RESCH_MES] : null;
+  const st = selO || meses.reduce((acc, m) => ({bloq: acc.bloq + m.bloq, porg: acc.porg + m.porg, sine: acc.sine + m.sine, tot: acc.tot + m.tot}), {bloq: 0, porg: 0, sine: 0, tot: 0});
+  const sw = c => `<span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${c};vertical-align:-1px"></span>`;
+  s += `<div class="${selO ? 'chsel' : 'legend'}" style="margin-bottom:6px">` + (selO ? `<b>${mesLbl(selO.key)}</b>` : '') +
+    `<span>${sw('var(--ch1)')} Por gestionar: <b>${nf0.format(st.porg)}</b></span>` +
+    `<span>${sw('var(--ch2)')} Sin entrega: <b>${nf0.format(st.sine)}</b></span>` +
+    `<span>Bloqueo: <b>${nf0.format(st.bloq)}</b></span>` +
+    `<span><span style="color:#0b8066">●</span> Stock total: <b>${nf0.format(st.tot)}</b></span>` +
+    (selO ? `<button class="btn" onclick="resChMes('')">✕ Ver todo el año</button>` : '') + '</div>';
+  if (!meses.length) return s + '<div class="empty">Sin stock con pedidos de este año.</div>';
+  const W = 620, H = 250, padL = 48, padR = 10, padT = 12, padB = 30;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxV = Math.max(...meses.map(m => Math.max(m.tot, m.porg, m.sine)), 1);
+  const n = meses.length, gw = plotW / n, bw = Math.min(20, gw * 0.3);
+  const yv = v => padT + plotH * (1 - v / maxV);
+  s += `<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:420px;max-width:${W}px;font-family:inherit">`;
+  [0.25, 0.5, 0.75, 1].forEach(f => {
+    const yy = yv(maxV * f);
+    s += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)"/>`;
+    s += `<text x="${padL - 6}" y="${yy + 3}" text-anchor="end" font-size="10" fill="var(--muted)">${nf0.format(maxV * f)}</text>`;
+  });
+  s += `<line x1="${padL}" y1="${yv(0)}" x2="${W - padR}" y2="${yv(0)}" stroke="var(--muted)" stroke-width="1.2"/>`;
+  meses.forEach((m, i) => {
+    const cx = padL + gw * i + gw / 2;
+    const dim = RESCH_MES && m.key !== RESCH_MES;
+    s += `<g style="cursor:pointer" opacity="${dim ? 0.25 : 1}" onclick="resChMes(this.dataset.k)" data-k="${m.key}">`;
+    s += `<rect x="${padL + gw * i}" y="${padT}" width="${gw}" height="${plotH + padB - 8}" fill="transparent"/>`;
+    s += `<rect x="${cx - bw - 2}" y="${yv(m.porg)}" width="${bw}" height="${Math.max(yv(0) - yv(m.porg), m.porg > 0 ? 2 : 0)}" rx="3" fill="var(--ch1)"${m.key === RESCH_MES ? ' style="filter:drop-shadow(0 0 4px rgba(0,168,107,.5))"' : ''}><title>${mesLbl(m.key)} · Por gestionar: ${nf0.format(m.porg)} t</title></rect>`;
+    s += `<rect x="${cx + 2}" y="${yv(m.sine)}" width="${bw}" height="${Math.max(yv(0) - yv(m.sine), m.sine > 0 ? 2 : 0)}" rx="3" fill="var(--ch2)"><title>${mesLbl(m.key)} · Sin entrega: ${nf0.format(m.sine)} t</title></rect>`;
+    s += `<text x="${cx}" y="${H - 10}" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--muted)">${MES_NOM[+m.key.slice(5, 7)] || ''}</text></g>`;
+  });
+  s += `<polyline points="${meses.map((m, i) => (padL + gw * i + gw / 2).toFixed(1) + ',' + yv(m.tot).toFixed(1)).join(' ')}" fill="none" stroke="rgba(11,128,102,.55)" stroke-width="2"/>`;
+  meses.forEach((m, i) => {
+    const cx = padL + gw * i + gw / 2;
+    s += `<circle cx="${cx}" cy="${yv(m.tot)}" r="3.5" fill="#0b8066" opacity="${RESCH_MES && m.key !== RESCH_MES ? 0.25 : 1}"><title>${mesLbl(m.key)} · Stock total: ${nf0.format(m.tot)} t</title></circle>`;
+  });
+  return s + '</svg></div>';
+}
 // Grafico: destinos (pais) con mayor carga Por Gestionar y Sin Entrega (barras horizontales agrupadas, SVG)
+// Didactico: clic en la barra o el pais selecciona/deselecciona ese destino (atenua el resto y muestra su detalle)
+let CHD_SEL = '';
+function chdSel(p){ CHD_SEL = CHD_SEL === p ? '' : p; renderChartDest(); }
 function renderChartDest(){
   const el = $('chartDest');
   const map = {};
@@ -2107,10 +2186,13 @@ function renderChartDest(){
   });
   const top = Object.values(map).sort((a, b) => (b.porg + b.sine) - (a.porg + a.sine)).slice(0, 10);
   if (!top.length){ el.innerHTML = '<div class="empty">Sin carga por gestionar ni sin entrega en este centro.</div>'; return; }
+  if (CHD_SEL && !top.some(o => o.pais === CHD_SEL)) CHD_SEL = '';
+  const sel = CHD_SEL ? top.find(o => o.pais === CHD_SEL) : null;
   const maxV = Math.max(...top.map(o => Math.max(o.porg, o.sine)), 1);
   const W = 760, labW = 64, valW = 62, barArea = W - labW - valW, rowH = 40, barH = 13, gap = 3;
   const H = top.length * rowH + 34;
-  let s = `<div class="legend" style="margin-bottom:8px"><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch1);vertical-align:-1px"></span> Por Gestionar</span><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch2);vertical-align:-1px"></span> Sin Entrega</span><span class="prog">top ${top.length} destinos · toneladas · ${esc(STK.centros[STKC] || '')}</span></div>`;
+  let s = `<div class="legend" style="margin-bottom:8px"><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch1);vertical-align:-1px"></span> Por Gestionar</span><span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--ch2);vertical-align:-1px"></span> Sin Entrega</span><span class="prog">top ${top.length} destinos · toneladas · ${esc(STK.centros[STKC] || '')} · toca una barra o país para aislarlo</span></div>`;
+  if (sel) s += `<div class="chsel"><b>${esc(sel.pais)}</b><span>Por Gestionar: <b>${fmt(sel.porg)} t</b></span><span>Sin Entrega: <b>${fmt(sel.sine)} t</b></span><span>Total: <b>${fmt(sel.porg + sel.sine)} t</b></span><button class="btn" onclick="chdSel('')">✕ Ver todos</button></div>`;
   s += `<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:560px;max-width:${W}px;font-family:inherit">`;
   [0.25, 0.5, 0.75, 1].forEach(f => {
     const x = labW + barArea * f;
@@ -2121,17 +2203,21 @@ function renderChartDest(){
     const y = i * rowH + 10;
     const w1 = Math.max(barArea * o.porg / maxV, o.porg > 0 ? 3 : 0);
     const w2 = Math.max(barArea * o.sine / maxV, o.sine > 0 ? 3 : 0);
+    const dim = CHD_SEL && o.pais !== CHD_SEL;
+    s += `<g style="cursor:pointer" opacity="${dim ? 0.22 : 1}" onclick="chdSel(this.dataset.p)" data-p="${esc(o.pais)}">`;
+    s += `<rect x="0" y="${y - 4}" width="${W - valW}" height="${rowH - 4}" fill="transparent"/>`;
     s += `<text x="${labW - 8}" y="${y + barH + 2}" text-anchor="end" font-size="12" font-weight="600" fill="var(--ink)">${esc(o.pais)}</text>`;
-    s += `<rect x="${labW}" y="${y}" width="${w1}" height="${barH}" rx="4" fill="var(--ch1)"><title>${esc(o.pais)} · Por Gestionar: ${fmt(o.porg)} t</title></rect>`;
+    s += `<rect x="${labW}" y="${y}" width="${w1}" height="${barH}" rx="4" fill="var(--ch1)"${o.pais === CHD_SEL ? ' style="filter:drop-shadow(0 0 4px rgba(0,168,107,.5))"' : ''}><title>${esc(o.pais)} · Por Gestionar: ${fmt(o.porg)} t</title></rect>`;
     if (o.porg > 0.5) s += `<text x="${labW + w1 + 5}" y="${y + barH - 3}" font-size="10.5" fill="var(--muted)">${nf0.format(o.porg)}</text>`;
     s += `<rect x="${labW}" y="${y + barH + gap}" width="${w2}" height="${barH}" rx="4" fill="var(--ch2)"><title>${esc(o.pais)} · Sin Entrega: ${fmt(o.sine)} t</title></rect>`;
     if (o.sine > 0.5) s += `<text x="${labW + w2 + 5}" y="${y + 2 * barH + gap - 3}" font-size="10.5" fill="var(--muted)">${nf0.format(o.sine)}</text>`;
+    s += '</g>';
   });
   s += `<line x1="${labW}" y1="6" x2="${labW}" y2="${H - 24}" stroke="var(--muted)" stroke-width="1.5"/>`;
   s += '</svg></div>';
   el.innerHTML = s;
 }
-function setStkCentro(c){ STKC = c; renderStock(); }
+function setStkCentro(c){ STKC = c; CHD_SEL = ''; renderStock(); }
 function renderStock(){
   if (!STK){
     $('stockNote').textContent = '';
@@ -2152,12 +2238,14 @@ function renderStock(){
   const SS = stkCalc(STKC);
   const nog = SS.porgM + SS.porgI + SS.sineM + SS.sineI;
   const pctK = v => SS.total ? Math.round(v / SS.total * 100) + '%' : '—';
+  const pctN = v => SS.total ? v / SS.total * 100 : 0;
+  const kSt = (cls, lbl, v, det, gfx) => `<div class="kpi kpr ${cls}"><div><div class="lbl">${lbl}</div><div class="val">${nf0.format(v)} t</div><div class="det">${det}</div></div>${gfx}</div>`;
   $('stkKpis').innerHTML =
-    `<div class="kpi"><div class="lbl">Stock Total</div><div class="val">${nf0.format(SS.total)} t</div><div class="det">${esc(STK.centros[STKC])}</div></div>` +
-    `<div class="kpi n"><div class="lbl">No Gestionado</div><div class="val">${nf0.format(nog)} t</div><div class="det">${pctK(nog)} del total</div></div>` +
-    `<div class="kpi g"><div class="lbl">Gestionado</div><div class="val">${nf0.format(SS.gestM + SS.gestI)} t</div><div class="det">${pctK(SS.gestM + SS.gestI)} del total</div></div>` +
-    `<div class="kpi n"><div class="lbl">Bloqueo de crédito</div><div class="val">${nf0.format(SS.bloqM + SS.bloqI)} t</div><div class="det">${pctK(SS.bloqM + SS.bloqI)} del total</div></div>` +
-    `<div class="kpi"><div class="lbl">Semielaborado + P09</div><div class="val">${nf0.format(SS.semi002 + SS.p09)} t</div><div class="det">${pctK(SS.semi002 + SS.p09)} del total</div></div>`;
+    kSt('', 'Stock Total', SS.total, esc(STK.centros[STKC]), deco('rip')) +
+    kSt('n', 'No Gestionado', nog, pctK(nog) + ' del total', ring(pctN(nog), 'warn')) +
+    kSt('g', 'Gestionado', SS.gestM + SS.gestI, pctK(SS.gestM + SS.gestI) + ' del total', ring(pctN(SS.gestM + SS.gestI))) +
+    kSt('n', 'Bloqueo de crédito', SS.bloqM + SS.bloqI, pctK(SS.bloqM + SS.bloqI) + ' del total', ring(pctN(SS.bloqM + SS.bloqI), 'bad')) +
+    kSt('', 'Semielaborado + P09', SS.semi002 + SS.p09, pctK(SS.semi002 + SS.p09) + ' del total', ring(pctN(SS.semi002 + SS.p09), 'gray'));
   renderChartDest();
   // Antiguedad por año -> mes (desplegable por año)
   const ag = stkAging(STKC);
