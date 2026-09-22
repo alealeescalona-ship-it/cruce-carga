@@ -120,6 +120,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <span class="dchip miss" id="chipSap" onclick="openUpload()">🏭 078: sin datos</span>
       <span class="dchip miss" id="chipTrans" onclick="openUpload()">🚚 Transporte: sin datos</span>
       <span class="dchip miss" id="chipStk" onclick="openUpload()">🧱 073: sin datos</span>
+      <span class="dchip miss" id="chip050" onclick="openUpload()">📌 050: sin datos</span>
       <button class="btn" onclick="openUpload()">⬆ Subir</button>
       <button class="btn" onclick="exportExcel(false)" title="Excel solo con las hojas de la pestaña actual">⬇ Excel</button>
       <button class="btn" onclick="exportExcel(true)" title="Libro Excel completo con todas las hojas">⬇ Excel todo</button>
@@ -130,7 +131,7 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
 
   <div class="upzone" id="upzone">
     <h2>Sube tus archivos Excel del día (puedes soltar varios a la vez)</h2>
-    <p>1) <b>Detalle cartulinas</b> (hoja "Datos") · 2) <b>SAP 078</b> (movimientos de despacho) · 3) <b>Programa Transporte</b> (hoja "OT-GDE")</p>
+    <p>1) <b>Detalle cartulinas</b> (hoja "Datos") · 2) <b>SAP 078</b> (despachos) · 3) <b>Programa Transporte</b> (OT-GDE) · 4) <b>073</b> (stock) · 5) <b>Saldo W</b> (cierres + base) · 6) <b>050</b> (embarques)</p>
     <p>Detecta cada tipo automáticamente, aunque vengan juntos en una misma planilla. Si subes varias 078 (ej. Maule y Valdivia por separado) en una misma tanda, se suman.</p>
     <button class="bigbtn" onclick="document.getElementById('fileInput').click()">Elegir archivos…</button>
     <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls" multiple style="display:none" onchange="handleFiles(this.files); this.value='';">
@@ -163,6 +164,8 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     <div class="tblbox"><div id="resAnio"></div></div>
     <div class="secttl">⚓ Saldos W por consolidador y planta</div>
     <div class="tblbox"><div id="resSaldosW"></div></div>
+    <div class="secttl">📦 Toneladas gestionadas por tipo — Pila / Rollo (archivo 050)</div>
+    <div class="tblbox"><div id="resTipo050"></div></div>
     <div class="secttl">🚢 Naves urgentes (Stk Máximo vencido o dentro de los próximos 3 días)</div>
     <div class="tblbox"><div id="resNaves"></div></div>
     <div class="secttl">⏰ Fin ready posterior al corte documental</div>
@@ -237,6 +240,11 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
       <button class="btn" onclick="copyPrio()">📋 Copiar para enviar a plantas</button>
     </div>
     <div class="tblbox"><div id="tblPrio"></div></div>
+    <div class="secttl">📌 Prioridades embarques (archivo 050)</div>
+    <p class="note">Del archivo 050: consolidador (Centro Destino) → nave → <b>Fecha en Destino</b>; <b>Stk Máx = fecha en destino + 3 días</b> (si cae fin de semana, queda el viernes). Pesos en planta topados al Peso Solicitud del ítem.</p>
+    <div class="tblbox"><div id="tblPrio050"></div></div>
+    <div class="secttl">🚨 Pallets siames con stock en planta</div>
+    <div class="tblbox"><div id="tblSiames"></div></div>
   </section>
 
   <!-- ============ TAB STOCK 073 ============ -->
@@ -277,6 +285,10 @@ td input.cell{width:80px;background:var(--edit-bg);border:1px solid var(--edit-l
     </div>
     <div class="secttl">Carga por consolidador — stock <span id="plName1"></span></div>
     <div class="tblbox"><div id="tblPlan1"></div></div>
+    <div class="secttl">📣 Demanda (va en el correo)</div>
+    <p class="note">Arma la tabla de demanda como la envías a plantas: destino, UT y nota de entrega (ej: "ENTREGA EL JUEVES"). Se guarda en este navegador y sale en el correo junto con las prioridades.</p>
+    <div class="summary"><span>Fecha de la demanda: <input class="cell" style="width:130px" type="date" id="demFecha" onchange="demSetFecha(this.value)"></span><button class="btn" onclick="demAddFila()">+ Agregar destino</button><button class="btn" onclick="demReset()">Reiniciar demanda</button></div>
+    <div class="tblbox"><div id="tblDem"></div></div>
     <div class="secttl closed">🚚 Programa transporte del día (OT-GDE, zona 1)</div>
     <p class="note" id="transNote" style="display:none"></p>
     <div class="tblbox" style="display:none"><div id="tblTrans"></div></div>
@@ -818,7 +830,8 @@ const REMMAP = {'DYC SAI':['D&C SAI','D&C SAI'], 'PC VALP':['D&C VALPARAÍSO','P
 const CENTRO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL','1807':'BODEGA NACIONAL / DYC LOG.'};
 const PAISES_TI = ['UY','AR','BO','PY'];
 const CLIENTES_DIRECTOS = [['EDIPAC','Edipac'], ['MM PACKAGING','MM Packaging'], ['MARINETTI','Marinetti']];
-let DET = null, SAP = null, TRANS = null, STK = null, CIE = null;
+let DET = null, SAP = null, TRANS = null, STK = null, CIE = null, E050 = null;
+const CONS_050 = {'1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL'};
 let MAIN = 'carga', TAB = 'G', PLANTA = 'Maule', STKC = '';
 let CHECKS = lsGet('cruceChecks', {});
 let HIST = lsGet('cruceHist073', {});   // {fechaISO: {centros:{code:nombre}, g:{code:{total,mar,int,chdir,chbod,semi,p09}}}}
@@ -861,6 +874,8 @@ async function handleFiles(files){
           ingestTransporte(aoa, f.name); encontrados.push('transporte OT-GDE');
         } else if (heads.includes('libre utiliz.') && heads.includes('almacen') && heads.includes('pedido')){
           ingest073(aoa, f.name); encontrados.push('stock 073');
+        } else if (heads.includes('centro destino') && heads.includes('nave o patente') && heads.includes('peso solicitud')){
+          ingest050(aoa, f.name); encontrados.push('embarques 050');
         } else if (heads.includes('ppos') && heads.includes('libre utiliz.') && heads.includes('embarqued')){
           baseAoa = aoa;
         } else if (!cieAoa){
@@ -1341,10 +1356,73 @@ function ingestCierres(cieAoa, hdrRow, baseAoa, fname){
   });
   CIE = {file: fname, fecha: hoyISO, resumen, detalle};
 }
-function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE}); }
+// ================== EMBARQUES 050 (prioridades por fecha en destino + pallets siames) ==================
+function ingest050(aoa, fname){
+  const heads = aoa[0].map(norm);
+  const ix = {};
+  heads.forEach((h, i) => { if (!(h in ix)) ix[h] = i; });
+  const col = n => ix[n] !== undefined ? ix[n] : -1;
+  const C = {
+    nave: col('nave o patente'), fdest: col('fecha en destino'), cons: col('centro destino'),
+    ped: col('ped.cliente/pos'), pesoSol: col('peso solicitud'), desc: col('descripcion'),
+    unidad: col('unidad'), pMa: col('peso ce.1801-002'), pVa: col('peso ce.1802-002'), cli: col('nombre cliente')
+  };
+  const rows = [];
+  for (let r = 1; r < aoa.length; r++){
+    const a = aoa[r]; if (!a) continue;
+    const consCod = String(a[C.cons] == null ? '' : a[C.cons]).trim().replace(/\.0$/, '');
+    const cons = CONS_050[consCod] || consCod;
+    if (!cons) continue;
+    const pesoSol = numv(a[C.pesoSol]);
+    // Regla: el peso en planta del item no puede superar el Peso Solicitud (columna V)
+    let ma = numv(a[C.pMa]), va = numv(a[C.pVa]);
+    if (pesoSol > 0){ if (ma > pesoSol) ma = pesoSol; if (va > pesoSol) va = pesoSol; }
+    const desc = String(a[C.desc] || '').trim();
+    rows.push({cons, nave: String(a[C.nave] || '').trim(), fdest: dstr(a[C.fdest]),
+      ped: String(a[C.ped] || '').trim(), cli: String(a[C.cli] || '').trim(),
+      ma: r3(ma), va: r3(va), desc, siames: /SIAMES/i.test(desc), unidad: String(a[C.unidad] || '').trim()});
+  }
+  const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
+  E050 = {file: fname, fecha: m ? m[1] : dateToISO(new Date()), rows};
+}
+// Stk max del 050: Fecha en Destino + 3 dias; si cae sabado/domingo se deja el viernes
+function stkMax050(fISO){
+  if (!fISO || fISO.length < 10) return '';
+  const d = isoToDate(fISO);
+  d.setDate(d.getDate() + 3);
+  if (d.getDay() === 6) d.setDate(d.getDate() - 1);
+  else if (d.getDay() === 0) d.setDate(d.getDate() - 2);
+  return dateToISO(d);
+}
+function prio050Data(){
+  const map = {};
+  ((E050 && E050.rows) || []).forEach(r => {
+    if (r.ma <= 0 && r.va <= 0) return;
+    const k = r.cons + '||' + r.fdest + '||' + r.nave;
+    const o = map[k] || (map[k] = {cons: r.cons, fdest: r.fdest, nave: r.nave, ma: 0, va: 0, peds: []});
+    o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va);
+    const p0 = r.ped.split('/')[0];
+    if (p0 && !o.peds.includes(p0)) o.peds.push(p0);
+  });
+  const list = Object.values(map);
+  list.forEach(x => x.stk = stkMax050(x.fdest));
+  list.sort((a, b) => (a.cons + a.fdest + a.nave).localeCompare(b.cons + b.fdest + b.nave));
+  return list;
+}
+function siamesData(){
+  const map = {};
+  ((E050 && E050.rows) || []).filter(r => r.siames).forEach(r => {
+    const p0 = r.ped.split('/')[0] || r.ped;
+    const k = p0 + '||' + r.desc;
+    const o = map[k] || (map[k] = {ped: p0, cli: r.cli, desc: r.desc, cons: r.cons, nave: r.nave, ma: 0, va: 0, items: 0});
+    o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va); o.items++;
+  });
+  return Object.values(map).sort((a, b) => (b.ma + b.va) - (a.ma + a.va));
+}
+function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE, e050: E050}); }
 function restoreData(){
   const d = lsGet('cruceData3', null);
-  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null;
+  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null; E050 = d.e050 || null;
     // Formato antiguo de cierres (sin lotes por centro): descartar para que se resuba el Saldo W
     if (CIE && CIE.detalle && CIE.detalle.length && !CIE.detalle[0].centro) CIE = null;
     if (STK) STKC = Object.keys(STK.centros)[0] || ''; }
@@ -1429,6 +1507,9 @@ function refreshChips(){
   const ck = $('chipStk');
   if (STK){ ck.className = 'dchip ok'; ck.innerHTML = `🧱 073 · ${Object.values(STK.centros).join(', ')}`; }
   else { ck.className = 'dchip miss'; ck.textContent = '🧱 073: sin datos'; }
+  const c5 = $('chip050');
+  if (E050){ c5.className = 'dchip ok'; c5.innerHTML = `📌 050 · ${E050.rows.length} ítems`; }
+  else { c5.className = 'dchip miss'; c5.textContent = '📌 050: sin datos'; }
   $('subline').textContent = DET
     ? 'Solo marítimo con stock en planta > 0 · gestionada = embarque real · no gestionada = embarque teórico (TBN)'
     : 'Sube tus archivos para armar el cruce automático.';
@@ -1436,7 +1517,7 @@ function refreshChips(){
 
 function refreshAll(){
   refreshChips();
-  const has = !!(DET || SAP || TRANS || STK || CIE);
+  const has = !!(DET || SAP || TRANS || STK || CIE || E050);
   $('upzone').style.display = (DET && SAP && TRANS) ? 'none' : '';
   $('mainTabs').style.display = has ? '' : 'none';
   if (DET) kpis();
@@ -1459,12 +1540,12 @@ function setMain(m){
   ['resumen','carga','prio','stock','sim','cie','plan'].forEach(x => {
     $('mt_' + x).classList.toggle('active', x === m);
     let show = x === m;
-    if ((x === 'carga' || x === 'prio') && !DET) show = false;
+    if (x === 'carga' && !DET) show = false;
     $('sec_' + x).style.display = show ? '' : 'none';
   });
   if (m === 'resumen') renderResumen();
   if (m === 'carga' && DET){ renderFaltaCarga(); if (TAB === 'A'){ setTab('A'); } else if (TAB === 'S'){ setTab('S'); } else { refreshSelects(); render(); } }
-  if (m === 'prio' && DET) renderPrio();
+  if (m === 'prio'){ renderPrio(); renderPrio050(); }
   if (m === 'stock') renderStock();
   if (m === 'sim') renderSim();
   if (m === 'cie') renderCierres();
@@ -1661,6 +1742,33 @@ function renderResumen(){
     } else $('resSaldosW').innerHTML = '<div class="empty">Sin saldos W vigentes ✅</div>';
   } else {
     $('resSaldosW').innerHTML = '<div class="empty">Sube el archivo Saldo W (pestaña Cierres) para ver este cuadro.</div>';
+  }
+  // Pila / Rollo gestionado (050): peso en plantas (topado a Peso Solicitud) por columna Unidad
+  if (E050){
+    const porTipo = {};
+    E050.rows.forEach(r => {
+      const t = (r.ma || 0) + (r.va || 0);
+      if (t <= 0) return;
+      const k = r.unidad || 'Sin tipo';
+      const o = porTipo[k] || (porTipo[k] = {ma: 0, va: 0, peds: new Set()});
+      o.ma += r.ma; o.va += r.va;
+      const p0 = r.ped.split('/')[0];
+      if (p0) o.peds.add(p0);
+    });
+    const tipos = Object.keys(porTipo).sort();
+    if (tipos.length){
+      let ht = '<table style="min-width:440px"><thead><tr><th>Tipo</th><th class="num">Pedidos</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th class="num">Total t</th></tr></thead><tbody>';
+      let tm2 = 0, tv2 = 0;
+      tipos.forEach(k => {
+        const o = porTipo[k];
+        tm2 += o.ma; tv2 += o.va;
+        ht += `<tr class="det"><td><b>${esc(k)}</b></td><td class="num">${o.peds.size}</td><td class="num">${fmt(o.ma)}</td><td class="num">${fmt(o.va)}</td><td class="num"><b>${fmt(o.ma + o.va)}</b></td></tr>`;
+      });
+      ht += `<tr class="tot"><td colspan="2">Total gestionado en plantas</td><td class="num">${fmt(tm2)}</td><td class="num">${fmt(tv2)}</td><td class="num">${fmt(tm2 + tv2)}</td></tr></tbody></table>`;
+      $('resTipo050').innerHTML = ht;
+    } else $('resTipo050').innerHTML = '<div class="empty">El 050 no tiene peso en plantas.</div>';
+  } else {
+    $('resTipo050').innerHTML = '<div class="empty">Sube el archivo 050 para ver Pila / Rollo gestionado.</div>';
   }
   // Naves urgentes (por fecha corte documental)
   if (DET){
@@ -1859,12 +1967,38 @@ function copyCorreo(){
     sel.forEach(p => { t3 += `<tr><td style="${td}">${esc(p.ped)}</td><td style="${td}">${esc(p.cli)}</td><td style="${td}">${esc(p.paisd)}</td><td style="${td}">${esc(p.cons)}</td><td style="${td}text-align:center">${fmt(PLANTA === 'Valdivia' ? p.va : p.ma)}</td><td style="${td}text-align:center">${fdate(p.fzp)}</td></tr>`; });
     t3 += `<tr><td style="${td}font-weight:bold" colspan="4">Total (${sel.length} pedidos)</td><td style="${td}text-align:center;font-weight:bold">${fmt(selT)}</td><td style="${td}"></td></tr></table>`;
   }
+  // Demanda (simulador de la seccion Demanda)
+  const dm = (PLAN.dem && PLAN.dem[PLANTA]) ? PLAN.dem[PLANTA] : null;
+  let t4 = '';
+  if (dm && dm.filas.some(f => numv(f.ut) > 0)){
+    let dt = 0;
+    t4 = `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt"><b>Demanda día ${fdate(dm.fecha)}</b></p>` +
+      `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}" colspan="2">${esc(PLANTA)} ${fdate(dm.fecha)}</td></tr><tr><td style="${th}">Destino</td><td style="${th}">UT</td></tr>`;
+    dm.filas.filter(f => numv(f.ut) > 0).forEach(f => {
+      dt += numv(f.ut);
+      t4 += `<tr><td style="${td}text-align:center">${esc(f.d)}${f.nota ? ' <b>' + esc(f.nota) + '</b>' : ''}</td><td style="${td}text-align:center">${nfe(numv(f.ut))}</td></tr>`;
+    });
+    t4 += `<tr><td style="${td}font-weight:bold;text-align:center">TOTAL</td><td style="${td}text-align:center;font-weight:bold">${nfe(dt)}</td></tr></table>`;
+  }
+  // Prioridades (no olvidar)
+  let t5 = '';
+  const priosC = (DET ? prioData() : []);
+  if (priosC.length){
+    t5 = `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt">No olvidar <b>prioridades</b>:</p>` +
+      `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Consolidador</td><td style="${th}">Corte doc.</td><td style="${th}">Stk Máximo</td><td style="${th}">Nave</td><td style="${th}">Maule t</td><td style="${th}">Valdivia t</td></tr>`;
+    priosC.forEach(x => {
+      const u = urgency(x.stk);
+      const stkStyle = u === 'bad' ? 'background:#dc1e1e;color:#fff;font-weight:bold;' : (u === 'warn' ? 'background:#f5c26b;font-weight:bold;' : '');
+      t5 += `<tr><td style="${td}">${esc(x.cons)}</td><td style="${td}text-align:center">${fdate(x.fcd)}</td><td style="${td}text-align:center;${stkStyle}">${fdate(x.stk)}</td><td style="${td}"><b>${esc(x.nave)}</b></td><td style="${td}text-align:center">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td style="${td}text-align:center">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+    });
+    t5 += '</table>';
+  }
   const tonAut = sel.length ? selT : tp;
   const ff = 'font-family:Calibri,Arial,sans-serif;font-size:11pt';
   const html = `<div style="${ff}"><p>Estimados, buenas tardes</p>` +
     `<p>Se adjunta${sel.length ? 'n' : ''} <b>${nfe(tonAut)} toneladas</b> autorizadas a mover a consolidador — Planta ${PLANTA}.</p>` +
     `<p><b>• Escenario actual de planta:</b></p>${t1}` +
-    `<p><b>• Programa y despacho de planta:</b></p>${t2}${t3}</div>`;
+    `<p><b>• Programa y despacho de planta:</b></p>${t2}${t3}${t4}${t5}</div>`;
   const plano = 'Estimados, buenas tardes\n\nSe adjuntan ' + nfe(tonAut) + ' toneladas autorizadas a mover a consolidador — Planta ' + PLANTA + '.\n\n(pega en el correo para ver las tablas con formato)';
   const done = () => toast('Correo copiado: pégalo en Outlook/Gmail y las tablas llegan con formato');
   try {
@@ -2377,6 +2511,7 @@ function prioView(){
   return {list, ord};
 }
 function renderPrio(){
+  if (!DET){ $('tblPrio').innerHTML = '<div class="empty">Sube el detalle de cartulinas para ver las prioridades de naves.</div>'; return; }
   const all = prioData();
   fillSelect('fPCons', 'Consolidador: todos', [...new Set(all.map(x => x.cons))].sort());
   fillSelect('fPNave', 'Nave: todas', [...new Set(all.map(x => x.nave))].sort());
@@ -2398,6 +2533,43 @@ function renderPrio(){
   h += `<tr class="tot"><td colspan="4">Total general (${list.length} naves)</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td></tr>`;
   h += '</tbody></table>';
   $('tblPrio').innerHTML = h;
+}
+function renderPrio050(){
+  if (!E050){
+    $('tblPrio050').innerHTML = '<div class="empty">Sube el archivo <b>050</b> para ver estas prioridades.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+    $('tblSiames').innerHTML = '';
+    return;
+  }
+  const list = prio050Data();
+  if (!list.length){ $('tblPrio050').innerHTML = '<div class="empty">Sin embarques 050 con peso en planta.</div>'; }
+  else {
+    let h = `<div class="note" style="padding:10px 10px 0">Archivo <b>${esc(E050.file)}</b> · ${E050.rows.length} ítems</div>`;
+    h += '<table><thead><tr><th>Consolidador</th><th>Nave</th><th>Fecha en destino</th><th>Stk Máximo</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+    let cur = null, sm = 0, sv = 0, tm = 0, tv = 0;
+    const sub = () => { if (cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
+    list.forEach(x => {
+      if (x.cons !== cur){ sub(); cur = x.cons; sm = 0; sv = 0; }
+      const u = urgency(x.stk);
+      const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
+      const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
+      h += `<tr class="det" title="${esc(x.peds.join(', '))}"><td>${esc(x.cons)}</td><td><b>${esc(x.nave)}</b></td><td class="mono">${fdate(x.fdest)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+      sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
+    });
+    sub();
+    h += `<tr class="tot"><td colspan="4">Total general</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td></tr></tbody></table>`;
+    $('tblPrio050').innerHTML = h;
+  }
+  const sia = siamesData();
+  const conPeso = sia.filter(s => s.ma > 0 || s.va > 0);
+  if (!sia.length){ $('tblSiames').innerHTML = '<div class="empty">Sin pallets siames en el 050 ✅</div>'; return; }
+  let h2 = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Tipo pallet</th><th>Consolidador</th><th>Nave</th><th class="num">Ítems</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
+  let stm = 0, stv = 0;
+  (conPeso.length ? conPeso : sia).forEach(s => {
+    stm += s.ma; stv += s.va;
+    h2 += `<tr class="det"><td class="mono">${esc(s.ped)}</td><td>${esc(s.cli)}</td><td><span class="pill warn">${esc(s.desc)}</span></td><td class="cli">${esc(s.cons)}</td><td class="cli">${esc(s.nave)}</td><td class="num">${s.items}</td><td class="num">${s.ma > 0 ? fmt(s.ma) : '—'}</td><td class="num">${s.va > 0 ? fmt(s.va) : '—'}</td></tr>`;
+  });
+  h2 += `<tr class="tot"><td colspan="6">Total ${conPeso.length ? '(' + conPeso.length + ' con stock en planta)' : '(sin stock en planta)'}</td><td class="num">${fmt(stm)}</td><td class="num">${fmt(stv)}</td></tr></tbody></table>`;
+  $('tblSiames').innerHTML = h2;
 }
 function copyPrio(){
   const {list} = prioView();
@@ -2534,7 +2706,37 @@ function renderPlan(){
   h2 += `<tr class="tot"><td>Total ${esc(PLANTA)}</td><td class="num">${fmtU(sp)}</td><td class="num">${fmtU(sd)}</td><td class="num">${fmtU(spor)}</td><td class="num">${fmt(ston)}</td><td class="num">${fmt(sr)}</td><td class="num">${fmtU(sr / CFG.tPlan)}</td></tr>`;
   h2 += '</tbody></table>';
   $('tblPlan2').innerHTML = h2;
+  renderDem();
   renderTrans();
+}
+// ================== DEMANDA (simulador para el correo) ==================
+function demGet(){
+  if (!PLAN.dem) PLAN.dem = {};
+  if (!PLAN.dem[PLANTA]){
+    PLAN.dem[PLANTA] = {fecha: dateToISO(new Date()),
+      filas: ['DYC SAI - 1890','PUERTO CORONEL - 1826','BODEGA NACIONAL - 1807','PC VALP - 1893','MARINETTI','INTERNACIONAL','EDIPAC'].map(d => ({d, ut: 0, nota: ''}))};
+  }
+  return PLAN.dem[PLANTA];
+}
+function demSetFecha(v){ demGet().fecha = v; savePlan(); renderDem(); }
+function demSet(i, campo, v){ const dm = demGet(); dm.filas[i][campo] = campo === 'ut' ? numv(v) : v; savePlan(); renderDem(); }
+function demAddFila(){ demGet().filas.push({d: '', ut: 0, nota: ''}); savePlan(); renderDem(); }
+function demDelFila(i){ demGet().filas.splice(i, 1); savePlan(); renderDem(); }
+function demReset(){ if (!confirm('¿Reiniciar la demanda de ' + PLANTA + '?')) return; delete PLAN.dem[PLANTA]; savePlan(); renderDem(); }
+function renderDem(){
+  const dm = demGet();
+  $('demFecha').value = dm.fecha || dateToISO(new Date());
+  let h = '<table style="min-width:560px"><thead><tr><th>Destino</th><th class="num">UT</th><th>Nota de entrega</th><th></th></tr></thead><tbody>';
+  let tot = 0;
+  dm.filas.forEach((f, i) => {
+    tot += numv(f.ut);
+    h += `<tr class="det"><td><input class="cell" style="width:240px;text-align:left" type="text" value="${esc(f.d)}" onchange="demSet(${i},'d',this.value)"></td>` +
+      `<td class="num"><input class="cell" style="width:60px" type="number" min="0" step="1" value="${f.ut || ''}" onchange="demSet(${i},'ut',this.value)"></td>` +
+      `<td><input class="cell" style="width:200px;text-align:left" type="text" placeholder="ej: ENTREGA EL JUEVES" value="${esc(f.nota)}" onchange="demSet(${i},'nota',this.value)"></td>` +
+      `<td><button class="btn" onclick="demDelFila(${i})" title="Quitar fila">✕</button></td></tr>`;
+  });
+  h += `<tr class="tot"><td>TOTAL ${esc(PLANTA)} ${fdate(dm.fecha)}</td><td class="num">${nf0.format(tot)}</td><td colspan="2"></td></tr></tbody></table>`;
+  $('tblDem').innerHTML = h;
 }
 function planProg(k, v){
   if (String(v).trim() === ''){ delete PLAN.progO[PLANTA][k]; }
@@ -2738,6 +2940,25 @@ function buildExport(){
         .concat(salC.map(o => [o.centro, o.peds.size || 0, o.lotes, r3(o.libre)]));
     }
   }
+  if (E050){
+    out['Prioridades 050'] = [['Consolidador','Nave','Fecha en destino','Stk Maximo','Alerta','Maule t','Valdivia t','Pedidos']]
+      .concat(prio050Data().map(x => [x.cons, x.nave, x.fdest, x.stk, alertaTxt(urgency(x.stk)), r3(x.ma), r3(x.va), x.peds.join(', ')]));
+    const sia2 = siamesData();
+    if (sia2.length) out['Pallets siames'] = [['Pedido','Cliente','Tipo pallet','Consolidador','Nave','Items','Maule t','Valdivia t']]
+      .concat(sia2.map(s => [s.ped, s.cli, s.desc, s.cons, s.nave, s.items, r3(s.ma), r3(s.va)]));
+    const porTipoE = {};
+    E050.rows.forEach(r => { const t = (r.ma || 0) + (r.va || 0); if (t <= 0) return; const k = r.unidad || 'Sin tipo'; const o = porTipoE[k] || (porTipoE[k] = {ma: 0, va: 0}); o.ma += r.ma; o.va += r.va; });
+    out['Pila Rollo 050'] = [['Tipo','Maule t','Valdivia t','Total t']]
+      .concat(Object.keys(porTipoE).sort().map(k => [k, r3(porTipoE[k].ma), r3(porTipoE[k].va), r3(porTipoE[k].ma + porTipoE[k].va)]));
+  }
+  if (PLAN.dem){
+    const rowsD = [['Planta','Fecha','Destino','UT','Nota']];
+    ['Maule','Valdivia'].forEach(pl => {
+      const dm2 = PLAN.dem[pl];
+      if (dm2) dm2.filas.filter(f => numv(f.ut) > 0).forEach(f => rowsD.push([pl, dm2.fecha, f.d, numv(f.ut), f.nota || '']));
+    });
+    if (rowsD.length > 1) out['Demanda'] = rowsD;
+  }
   const fechasH = Object.keys(HIST).sort().reverse();
   if (fechasH.length){
     const centrosH = simCentros();
@@ -2810,13 +3031,13 @@ function addSheetTable(wb, name, aoa, ti){
 }
 // Hojas que corresponden a cada pestaña (para la descarga por pestaña)
 const HOJAS_TAB = {
-  resumen: n => ['Resumen stock grupos','Stock por año','Saldos por centro','Naves urgentes','Ready vs corte'].includes(n),
+  resumen: n => ['Resumen stock grupos','Stock por año','Saldos por centro','Naves urgentes','Ready vs corte','Pila Rollo 050'].includes(n),
   carga: n => ['Resumen gestionada','Resumen no gestionada','Gestionada','No gestionada','Falta produccion','Saldos contabilizados'].includes(n),
-  prio: n => n === 'Prioridades' || n === 'Naves urgentes',
+  prio: n => ['Prioridades','Naves urgentes','Prioridades 050','Pallets siames'].includes(n),
   stock: n => ['Stock 073','Stock por año','Carga antigua','Semielaborado SEMI','Stock P09'].includes(n) || n.startsWith('Antiguedad'),
   sim: n => ['Simulador','Historico 073'].includes(n),
   cie: n => ['Cierres resumen','Cierres detalle','Saldos por centro'].includes(n),
-  plan: n => ['Planificacion','Transporte','Despachos 078'].includes(n)
+  plan: n => ['Planificacion','Transporte','Despachos 078','Demanda'].includes(n)
 };
 async function exportExcel(todo){
   const secs = buildExport();
@@ -2929,6 +3150,13 @@ function exportPDF(){
       if (salC.length) sections.push(['Saldos W por consolidador y planta', [['Consolidador / Planta','Pedidos','Q Lotes','Saldo t']]
         .concat(salC.map(o => [o.centro, o.peds.size || 0, o.lotes, r3(o.libre)]))]);
     }
+    if (E050){
+      const porTipoP = {};
+      E050.rows.forEach(r => { const t = (r.ma || 0) + (r.va || 0); if (t <= 0) return; const k = r.unidad || 'Sin tipo'; const o = porTipoP[k] || (porTipoP[k] = {ma: 0, va: 0}); o.ma += r.ma; o.va += r.va; });
+      const tiposP = Object.keys(porTipoP).sort();
+      if (tiposP.length) sections.push(['Toneladas gestionadas por tipo — Pila / Rollo (050)', [['Tipo','Maule t','Valdivia t','Total t']]
+        .concat(tiposP.map(k => [k, r3(porTipoP[k].ma), r3(porTipoP[k].va), r3(porTipoP[k].ma + porTipoP[k].va)]))]);
+    }
     if (!sections.length) return toast('Aún no hay datos cargados');
     fname = 'resumen'; titulo = 'Resumen ejecutivo';
   } else if (MAIN === 'sim'){
@@ -2960,8 +3188,17 @@ function exportPDF(){
     }
     fname = 'carga'; titulo = 'Carga marítima con stock en planta';
   } else if (MAIN === 'prio'){
-    if (!DET) return toast('Sube el detalle de cartulinas primero');
-    sections = [['Prioridades naves (Stk Máximo = corte doc − 2 días, fin de semana → viernes)', prioAoa()]];
+    sections = [];
+    if (DET) sections.push(['Prioridades naves (Stk Máximo = corte doc − 2 días, fin de semana → viernes)', prioAoa()]);
+    if (E050){
+      sections.push(['Prioridades embarques 050 (Stk Máx = fecha en destino + 3 días, fin de semana → viernes)',
+        [['Consolidador','Nave','Fecha destino','Stk Máximo','Alerta','Maule t','Valdivia t']]
+          .concat(prio050Data().map(x => [x.cons, x.nave, x.fdest, x.stk, alertaTxt(urgency(x.stk)), r3(x.ma), r3(x.va)]))]);
+      const siaP = siamesData();
+      if (siaP.length) sections.push(['Pallets siames', [['Pedido','Cliente','Tipo pallet','Consolidador','Nave','Maule t','Valdivia t']]
+        .concat(siaP.map(s => [s.ped, s.cli, s.desc, s.cons, s.nave, r3(s.ma), r3(s.va)]))]);
+    }
+    if (!sections.length) return toast('Sube el detalle o el 050 primero');
     fname = 'prioridades'; titulo = 'Prioridades naves para plantas';
   } else if (MAIN === 'desp'){
     if (!SAP) return toast('Sube la 078 primero');
@@ -3023,6 +3260,18 @@ function exportPDF(){
       if (DET) sections.push(['Carga por consolidador — ' + pl, consAoa(pl)]);
       sections.push(['Programa del día vs despachado — ' + pl, progAoa(pl)]);
     });
+    if (PLAN.dem){
+      ['Maule','Valdivia'].forEach(pl => {
+        const dm3 = PLAN.dem[pl];
+        if (dm3 && dm3.filas.some(f => numv(f.ut) > 0)){
+          const aoaD = [['Destino','UT','Nota']];
+          let tD = 0;
+          dm3.filas.filter(f => numv(f.ut) > 0).forEach(f => { tD += numv(f.ut); aoaD.push([f.d, numv(f.ut), f.nota || '']); });
+          aoaD.push(['TOTAL', tD, '']);
+          sections.push(['Demanda ' + pl + ' — ' + dm3.fecha, aoaD]);
+        }
+      });
+    }
     if (TRANS) sections.push(['Programa transporte (zona 1, 1 OT = 1 UT)', transAoa()]);
     if (SAP) sections.push(['Despachos 078 por centro', despAoa()]);
     fname = 'planificacion'; titulo = 'Planificación por planta';
