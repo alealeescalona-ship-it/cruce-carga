@@ -133,7 +133,17 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 .cfg{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;box-shadow:var(--shadow)}
 .cfg input{width:64px}
 .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:10px;align-items:center}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0f172a;color:#f1f5f9;padding:11px 20px;border-radius:11px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .25s;max-width:90%;text-align:center;z-index:50;box-shadow:0 8px 24px rgba(15,23,42,.35)}
+#modalBg{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:44px 14px;backdrop-filter:blur(2px)}
+#modalBg.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,.35);max-width:780px;width:100%;max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
+.modal .mhead{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--strip)}
+.modal .mhead b{font-size:13.5px}
+.modal .mhead .btn{margin-left:auto;flex:none}
+.modal .mbody{overflow:auto}
+.modal table{min-width:0;width:100%}
+.kpi[ondblclick],tr[ondblclick]{user-select:none}
+.kpi[ondblclick]{cursor:pointer}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0f172a;color:#f1f5f9;padding:11px 20px;border-radius:11px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .25s;max-width:90%;text-align:center;z-index:70;box-shadow:0 8px 24px rgba(15,23,42,.35)}
 #toast.show{opacity:.97}
 .neg{color:var(--bad-ink)}
 .autohint{font-size:11px;color:var(--muted);display:block;margin-top:2px}
@@ -255,7 +265,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <!-- ============ TAB PRIORIDADES ============ -->
   <section id="sec_prio" style="display:none">
-    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = Stk Máximo entre hoy y 3 días más; <b>VENCIDA ⛔</b> = Stk Máximo ya pasado.</p>
+    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = Stk Máximo entre hoy y 3 días más; <b>VENCIDA ⛔</b> = Stk Máximo ya pasado. <b>Doble clic en una nave</b> = ventana con transporte, cliente, pedido e ítem pendientes.</p>
     <div class="ctrl"><div class="filters">
       <select id="fPCons" onchange="renderPrio()"></select>
       <select id="fPNave" onchange="renderPrio()"></select>
@@ -273,7 +283,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     </div></div>
     <div class="tblbox"><div id="tblPrio"></div></div>
     <div class="secttl">📌 Prioridades embarques (archivo 050)</div>
-    <p class="note">Del archivo 050: consolidador (Centro Destino) → nave → <b>Fecha en Destino</b>; <b>Stk Máx = fecha en destino + 3 días</b> (si cae fin de semana, queda el viernes). Pesos en planta topados al Peso Solicitud del ítem.</p>
+    <p class="note">Del archivo 050: consolidador (Centro Destino) → nave → <b>Fecha en Destino</b>; <b>Stk Máx = fecha en destino + 3 días</b> (si cae fin de semana, queda el viernes). Pesos en planta topados al Peso Solicitud del ítem. <b>Doble clic en una nave</b> = ventana con cliente, pedido e ítem pendientes.</p>
     <div class="tblbox"><div id="tblPrio050"></div></div>
     <div class="secttl">🚨 Pallets siames con stock en planta</div>
     <div class="tblbox"><div id="tblSiames"></div></div>
@@ -336,6 +346,12 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
   </section>
 
   <footer>Panel de cruce logístico · los datos se procesan y guardan solo en tu navegador · marca ✓ cada línea revisada</footer>
+</div>
+<div id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="mhead"><b id="modalTtl"></b><button class="btn" onclick="closeModal()">✕ Cerrar</button></div>
+    <div class="mbody" id="modalBody"></div>
+  </div>
 </div>
 <div id="toast"></div>
 
@@ -1021,7 +1037,8 @@ function ingestDetalle(aoa, fname){
       ge: r3(numv(a[C.ge])), py: r3(numv(a[C.py])),
       cons: String(a[C.cons] || ''), nave: String(a[C.nave] || ''),
       fcd: dstr(a[C.fcd]), fzp: dstr(a[C.fzp]), femb: dstr(a[C.femb]),
-      sem: String(a[C.sem] == null ? '' : a[C.sem]), bk: String(a[C.bk] || ''), ges: String(a[C.ges] || '')
+      sem: String(a[C.sem] == null ? '' : a[C.sem]), bk: String(a[C.bk] || ''), ges: String(a[C.ges] || ''),
+      ent: String(a[C.ent2] == null ? '' : a[C.ent2]).trim(), ntr: String(a[C.ntr] == null ? '' : a[C.ntr]).trim()
     });
   }
   const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
@@ -1407,9 +1424,10 @@ function ingest050(aoa, fname){
     const cons = CONS_050[consCod] || consCod;
     if (!cons) continue;
     const pesoSol = numv(a[C.pesoSol]);
-    // Regla: el peso en planta del item no puede superar el Peso Solicitud (columna V)
+    // Regla: el peso en planta del item no puede superar el Peso Solicitud (columna V).
+    // Si Maule+Valdivia supera lo solicitado se toma lo solicitado (recorte proporcional); si es menor, queda el peso de planta.
     let ma = numv(a[C.pMa]), va = numv(a[C.pVa]);
-    if (pesoSol > 0){ if (ma > pesoSol) ma = pesoSol; if (va > pesoSol) va = pesoSol; }
+    if (pesoSol > 0 && ma + va > pesoSol){ const fq = pesoSol / (ma + va); ma *= fq; va *= fq; }
     const desc = String(a[C.desc] || '').trim();
     rows.push({cons, nave: String(a[C.nave] || '').trim(), fdest: dstr(a[C.fdest]),
       ped: String(a[C.ped] || '').trim(), cli: String(a[C.cli] || '').trim(),
@@ -1434,7 +1452,7 @@ function prio050Data(){
     // Misma nave con fechas en destino de la misma semana (martes a lunes): una sola fila, fecha mas cercana
     const sem = r.fdest ? semanaMartes(r.fdest).key : '';
     const k = r.cons + '||' + r.nave + '||' + sem;
-    const o = map[k] || (map[k] = {cons: r.cons, fdest: r.fdest, nave: r.nave, ma: 0, va: 0, peds: []});
+    const o = map[k] || (map[k] = {cons: r.cons, fdest: r.fdest, nave: r.nave, sem, ma: 0, va: 0, peds: []});
     if (r.fdest && (!o.fdest || r.fdest < o.fdest)) o.fdest = r.fdest;
     o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va);
     const p0 = r.ped.split('/')[0];
@@ -1560,6 +1578,82 @@ function refreshAll(){
   setMain(MAIN);
 }
 
+// ================== ventana emergente (doble clic para ver detalle) ==================
+function openModal(ttl, html){
+  $('modalTtl').innerHTML = ttl;
+  $('modalBody').innerHTML = html;
+  $('modalBg').classList.add('show');
+}
+function closeModal(){ $('modalBg').classList.remove('show'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+// Detalle 073 por categoria: pedido / item (entrega) / cliente / ton
+const STK_MODAL_DEF = {
+  TOT: ['Stock Total', null],
+  NOG: ['No Gestionado (por gestionar + sin entrega)', ['PORG_M','PORG_I','SINE_M','SINE_I']],
+  GESTT: ['Gestionado', ['GEST_M','GEST_I']],
+  BLOQT: ['Bloqueo de crédito', ['BLOQ_M','BLOQ_I']],
+  SEMIP09: ['Semielaborado + P09', ['SEMI','P09']],
+  BLOQ_M: ['Bloqueado Marítimo', ['BLOQ_M']], BLOQ_I: ['Bloqueado Internacional', ['BLOQ_I']],
+  PORG_M: ['Por Gestionar Marítimo', ['PORG_M']], PORG_I: ['Por Gestionar Terrestre Internacional', ['PORG_I']],
+  SINE_M: ['Sin Entrega Marítimo', ['SINE_M']], SINE_I: ['Sin Entrega Internacional', ['SINE_I']],
+  GEST_M: ['Gestionado Marítimo', ['GEST_M']], GEST_I: ['Gestionado Terrestre Internacional', ['GEST_I']],
+  CHDIR: ['Chile Directo', ['CHDIR']], CHBOD: ['Chile Bodega Nacional', ['CHBOD']],
+  SEMI: ['Semielaborado Redirigidos', ['SEMI']], P09: ['Almacén P09', ['P09']], OTROS_ALM: ['Otros almacenes', ['OTROS_ALM']]
+};
+function stkModal(key){
+  if (!STK) return;
+  const def = STK_MODAL_DEF[key];
+  if (!def) return;
+  const rows = def[1] ? def[1].reduce((acc, c) => acc.concat(stkRowsDet(STKC, c)), []) : STK.rows.filter(r => r.centro === STKC);
+  if (!rows.length) return toast('Sin pedidos en esta categoría');
+  const agg = {};
+  rows.forEach(r => {
+    const k = r.ped + '||' + (r.ent || '');
+    const o = agg[k] || (agg[k] = {ped: r.ped, ent: r.ent, cli: r.cli, t: 0});
+    o.t += r.libre;
+  });
+  const list = Object.values(agg).sort((a, b) => b.t - a.t);
+  let tt = 0;
+  let h = '<table><thead><tr><th>Pedido</th><th>Ítem (entrega)</th><th>Cliente</th><th class="num">Ton</th></tr></thead><tbody>';
+  list.forEach(o => { tt += o.t; h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td class="mono">${esc(o.ent) || '—'}</td><td>${esc(o.cli)}</td><td class="num">${fmt(o.t)}</td></tr>`; });
+  h += `<tr class="tot"><td colspan="3">Total (${list.length} ítems)</td><td class="num">${fmt(tt)}</td></tr></tbody></table>`;
+  openModal(`🧱 ${def[0]} — ${esc(STK.centros[STKC] || '')}`, h);
+}
+// Detalle de una nave en Prioridades (detalle cartulinas): transporte / cliente / pedido / item
+function prioModal(cons, nave, sem){
+  const rows = gPend().filter(r => r.cons === cons && r.nave === nave && ((r.fcd ? semanaMartes(r.fcd).key : '') === sem));
+  if (!rows.length) return;
+  const agg = {};
+  rows.forEach(r => {
+    const k = r.ped + '||' + r.pos;
+    const o = agg[k] || (agg[k] = {ped: r.ped, pos: r.pos, cli: r.cli, ntr: '', t: 0});
+    o.t += r.ma + r.va;
+    if (r.ntr && !o.ntr) o.ntr = r.ntr;
+  });
+  const list = Object.values(agg).sort((a, b) => b.t - a.t);
+  let tt = 0;
+  let h = '<table><thead><tr><th>Transporte</th><th>Cliente</th><th>Pedido</th><th>Ítem (pos)</th><th class="num">Ton</th></tr></thead><tbody>';
+  list.forEach(o => { tt += o.t; h += `<tr class="det"><td class="mono">${esc(o.ntr) || '—'}</td><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.pos) || '—'}</td><td class="num">${fmt(o.t)}</td></tr>`; });
+  h += `<tr class="tot"><td colspan="4">Total pendiente (${list.length} posiciones)</td><td class="num">${fmt(tt)}</td></tr></tbody></table>`;
+  if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte se guarda desde ahora: vuelve a subir el detalle de cartulinas de hoy para verlo.</p>' + h;
+  openModal(`🚢 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar · stk máx ${fdate(stkMax(rows.map(r => r.fcd).filter(Boolean).sort()[0] || ''))}</span>`, h);
+}
+// Detalle de una nave en Prioridades 050: cliente / pedido / item / pesos por planta
+function prio050Modal(cons, nave, sem){
+  const rows = ((E050 && E050.rows) || []).filter(r => (r.ma > 0 || r.va > 0) && r.cons === cons && r.nave === nave && ((r.fdest ? semanaMartes(r.fdest).key : '') === sem));
+  if (!rows.length) return;
+  const agg = {};
+  rows.forEach(r => {
+    const o = agg[r.ped] || (agg[r.ped] = {ped: r.ped.split('/')[0], item: r.ped.includes('/') ? r.ped.split('/').slice(1).join('/') : '', cli: r.cli, ma: 0, va: 0});
+    o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va);
+  });
+  const list = Object.values(agg).sort((a, b) => (b.ma + b.va) - (a.ma + a.va));
+  let tm = 0, tv = 0;
+  let h = '<table><thead><tr><th>Cliente</th><th>Pedido</th><th>Ítem (pos)</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th class="num">Total</th></tr></thead><tbody>';
+  list.forEach(o => { tm += o.ma; tv += o.va; h += `<tr class="det"><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.item) || '—'}</td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td><td class="num"><b>${fmt(o.ma + o.va)}</b></td></tr>`; });
+  h += `<tr class="tot"><td colspan="3">Total (${list.length} ítems)</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td><td class="num">${fmt(tm + tv)}</td></tr></tbody></table>`;
+  openModal(`📌 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar (050)</span>`, h);
+}
 function deco(t){
   const v = t === 'radar' || t === 'dotsWarn' ? '180,83,9' : '0,168,107';
   const s = `<svg class="ring" width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">`;
@@ -2085,7 +2179,8 @@ function stkResumen(centro){
   STK_CATS.forEach(([id, lbl, subs, rojo]) => {
     const t = catT[id];
     if (t <= 0.0005 && id !== 'NOG') return;
-    filas.push({tipo: 'cat', lbl, t, pTot: pct(t), rojo, cat: id === 'BLOQ' ? 'BLOQ_M' : (id === 'NOG' ? 'PORG_M' : (id === 'P09A' ? 'P09' : id))});
+    filas.push({tipo: 'cat', lbl, t, pTot: pct(t), rojo, cat: id === 'BLOQ' ? 'BLOQ_M' : (id === 'NOG' ? 'PORG_M' : (id === 'P09A' ? 'P09' : id)),
+      catM: id === 'BLOQ' ? 'BLOQT' : (id === 'P09A' ? 'P09' : id)});
     if (subs === 'clientes'){
       Object.keys(S.chdir).sort().forEach(c => filas.push({tipo: 'sub', lbl: c, t: S.chdir[c], pPar: pct(S.chdir[c]), cat: 'CHDIR'}));
     } else if (Array.isArray(subs)){
@@ -2093,7 +2188,7 @@ function stkResumen(centro){
       subs.forEach(([sid, slbl]) => { if (sv[sid] > 0.0005) filas.push({tipo: 'sub', lbl: slbl, t: sv[sid], pPar: pct(sv[sid]), cat: sid}); });
     }
   });
-  if (S.otrosAlm > 0.0005) filas.push({tipo: 'cat', lbl: 'Otros almacenes', t: S.otrosAlm, pTot: pct(S.otrosAlm), rojo: false, cat: 'OTROS_ALM'});
+  if (S.otrosAlm > 0.0005) filas.push({tipo: 'cat', lbl: 'Otros almacenes', t: S.otrosAlm, pTot: pct(S.otrosAlm), rojo: false, cat: 'OTROS_ALM', catM: 'OTROS_ALM'});
   filas.push({tipo: 'tot', lbl: 'Stock Total', t: S.total});
   return filas;
 }
@@ -2224,7 +2319,7 @@ function renderStock(){
     $('stkCentroNom').textContent = '';
     return;
   }
-  $('stockNote').innerHTML = `Archivo <b>${esc(STK.file)}</b> · ${STK.rows.length} filas · almacén 002 clasificado por país/cliente y estado (embarque → gestionado; entrega con fecha → por gestionar; sin entrega; bloqueo C1/C2 rebajado de las demás) · P09 = semielaborado redirigido`;
+  $('stockNote').innerHTML = `Archivo <b>${esc(STK.file)}</b> · ${STK.rows.length} filas · almacén 002 clasificado por país/cliente y estado (embarque → gestionado; entrega con fecha → por gestionar; sin entrega; bloqueo C1/C2 rebajado de las demás) · P09 = semielaborado redirigido · <b>doble clic en una tarjeta o fila del cuadro</b> = ventana con pedido, ítem, cliente y ton`;
   const centros = Object.keys(STK.centros);
   if (!centros.includes(STKC)) STKC = centros[0];
   $('stkCentros').innerHTML = '<span style="font-weight:700">Centro:</span> ' + centros.map(c =>
@@ -2235,13 +2330,13 @@ function renderStock(){
   const nog = SS.porgM + SS.porgI + SS.sineM + SS.sineI;
   const pctK = v => SS.total ? Math.round(v / SS.total * 100) + '%' : '—';
   const pctN = v => SS.total ? v / SS.total * 100 : 0;
-  const kSt = (cls, lbl, v, det, gfx) => `<div class="kpi kpr ${cls}"><div><div class="lbl">${lbl}</div><div class="val">${nf0.format(v)} t</div><div class="det">${det}</div></div>${gfx}</div>`;
+  const kSt = (cls, lbl, v, det, gfx, mkey) => `<div class="kpi kpr ${cls}" title="Doble clic: ver pedido, ítem, cliente y ton" ondblclick="stkModal('${mkey}')"><div><div class="lbl">${lbl}</div><div class="val">${nf0.format(v)} t</div><div class="det">${det}</div></div>${gfx}</div>`;
   $('stkKpis').innerHTML =
-    kSt('', 'Stock Total', SS.total, esc(STK.centros[STKC]), deco('rip')) +
-    kSt('n', 'No Gestionado', nog, pctK(nog) + ' del total', ring(pctN(nog), 'warn')) +
-    kSt('g', 'Gestionado', SS.gestM + SS.gestI, pctK(SS.gestM + SS.gestI) + ' del total', ring(pctN(SS.gestM + SS.gestI))) +
-    kSt('n', 'Bloqueo de crédito', SS.bloqM + SS.bloqI, pctK(SS.bloqM + SS.bloqI) + ' del total', ring(pctN(SS.bloqM + SS.bloqI), 'bad')) +
-    kSt('', 'Semielaborado + P09', SS.semi002 + SS.p09, pctK(SS.semi002 + SS.p09) + ' del total', ring(pctN(SS.semi002 + SS.p09), 'gray'));
+    kSt('', 'Stock Total', SS.total, esc(STK.centros[STKC]), deco('rip'), 'TOT') +
+    kSt('n', 'No Gestionado', nog, pctK(nog) + ' del total', ring(pctN(nog), 'warn'), 'NOG') +
+    kSt('g', 'Gestionado', SS.gestM + SS.gestI, pctK(SS.gestM + SS.gestI) + ' del total', ring(pctN(SS.gestM + SS.gestI)), 'GESTT') +
+    kSt('n', 'Bloqueo de crédito', SS.bloqM + SS.bloqI, pctK(SS.bloqM + SS.bloqI) + ' del total', ring(pctN(SS.bloqM + SS.bloqI), 'bad'), 'BLOQT') +
+    kSt('', 'Semielaborado + P09', SS.semi002 + SS.p09, pctK(SS.semi002 + SS.p09) + ' del total', ring(pctN(SS.semi002 + SS.p09), 'gray'), 'SEMIP09');
   renderChartDest();
   // Antiguedad por año -> mes (desplegable por año)
   const ag = stkAging(STKC);
@@ -2285,12 +2380,12 @@ function renderStock(){
   let h = '<table style="min-width:520px"><thead><tr><th>Categoría</th><th class="num">Tons</th><th class="num">%Parcial</th><th class="num">%Total</th></tr></thead><tbody>';
   filas.forEach(f => {
     if (f.tipo === 'tot'){
-      h += `<tr class="tot"><td>Stock Total</td><td class="num">${nf0.format(f.t)}</td><td></td><td></td></tr>`;
+      h += `<tr class="tot" style="cursor:pointer" title="Doble clic: ver pedidos" ondblclick="stkModal('TOT')"><td>Stock Total</td><td class="num">${nf0.format(f.t)}</td><td></td><td></td></tr>`;
     } else if (f.tipo === 'cat'){
       const pill = f.rojo ? `<span class="pill bad"><b>${f.pTot}</b></span>` : `<span class="pill">${f.pTot}</span>`;
-      h += `<tr class="grp" style="cursor:pointer" onclick="verCat('${f.cat}')"><td><b>${esc(f.lbl)}</b></td><td class="num"><b>${nf0.format(f.t)}</b></td><td></td><td class="num">${pill}</td></tr>`;
+      h += `<tr class="grp" style="cursor:pointer" title="Clic: detalle abajo · Doble clic: ventana con pedidos" onclick="verCat('${f.cat}')" ondblclick="stkModal('${f.catM}')"><td><b>${esc(f.lbl)}</b></td><td class="num"><b>${nf0.format(f.t)}</b></td><td></td><td class="num">${pill}</td></tr>`;
     } else {
-      h += `<tr class="det" style="cursor:pointer" onclick="verCat('${f.cat}')"><td style="padding-left:32px">${esc(f.lbl)}</td><td class="num">${nf0.format(f.t)}</td><td class="num cli">${f.pPar}</td><td></td></tr>`;
+      h += `<tr class="det" style="cursor:pointer" title="Clic: detalle abajo · Doble clic: ventana con pedidos" onclick="verCat('${f.cat}')" ondblclick="stkModal('${f.cat}')"><td style="padding-left:32px">${esc(f.lbl)}</td><td class="num">${nf0.format(f.t)}</td><td class="num cli">${f.pPar}</td><td></td></tr>`;
     }
   });
   h += '</tbody></table>';
@@ -2636,7 +2731,7 @@ function prioData(){
     // Misma nave con cortes en la misma semana (martes a lunes): una sola fila, fecha mas cercana
     const sem = r.fcd ? semanaMartes(r.fcd).key : '';
     const k = r.cons + '||' + r.nave + '||' + sem;
-    if (!map[k]) map[k] = {cons: r.cons, fcd: r.fcd, nave: r.nave, ma: 0, va: 0};
+    if (!map[k]) map[k] = {cons: r.cons, fcd: r.fcd, nave: r.nave, sem, ma: 0, va: 0};
     if (r.fcd && (!map[k].fcd || r.fcd < map[k].fcd)) map[k].fcd = r.fcd;
     map[k].ma += r.ma; map[k].va += r.va;
   });
@@ -2674,7 +2769,7 @@ function renderPrio(){
     const u = urgency(x.stk);
     const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
     const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-    h += `<tr class="det"><td>${esc(x.cons)}</td><td class="mono">${fdate(x.fcd)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+    h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prioModal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td class="mono">${fdate(x.fcd)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
     sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
   });
   subtotal();
@@ -2700,7 +2795,7 @@ function renderPrio050(){
       const u = urgency(x.stk);
       const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
       const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-      h += `<tr class="det" title="${esc(x.peds.join(', '))}"><td>${esc(x.cons)}</td><td><b>${esc(x.nave)}</b></td><td class="mono">${fdate(x.fdest)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+      h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prio050Modal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td><b>${esc(x.nave)}</b></td><td class="mono">${fdate(x.fdest)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
       sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
     });
     sub();
