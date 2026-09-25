@@ -135,10 +135,10 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:10px;align-items:center}
 #modalBg{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:44px 14px;backdrop-filter:blur(2px)}
 #modalBg.show{display:flex}
-.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,.35);max-width:780px;width:100%;max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
-.modal .mhead{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--strip)}
-.modal .mhead b{font-size:13.5px}
-.modal .mhead .btn{margin-left:auto;flex:none}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,.35);max-width:920px;width:100%;max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
+.modal .mhead{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--strip)}
+.modal .mhead b{font-size:13.5px;margin-right:auto}
+.modal .mhead .btn{flex:none}
 .modal .mbody{overflow:auto}
 .modal table{min-width:0;width:100%}
 .kpi[ondblclick],tr[ondblclick]{user-select:none}
@@ -349,7 +349,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 </div>
 <div id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
-    <div class="mhead"><b id="modalTtl"></b><button class="btn" onclick="closeModal()">✕ Cerrar</button></div>
+    <div class="mhead"><b id="modalTtl"></b><button class="btn" id="modalXls" onclick="modalExcel()" title="Descarga a Excel solo lo que muestra esta ventana">📗 Excel</button><button class="btn" onclick="closeModal()">✕ Cerrar</button></div>
     <div class="mbody" id="modalBody"></div>
   </div>
 </div>
@@ -1038,7 +1038,8 @@ function ingestDetalle(aoa, fname){
       cons: String(a[C.cons] || ''), nave: String(a[C.nave] || ''),
       fcd: dstr(a[C.fcd]), fzp: dstr(a[C.fzp]), femb: dstr(a[C.femb]),
       sem: String(a[C.sem] == null ? '' : a[C.sem]), bk: String(a[C.bk] || ''), ges: String(a[C.ges] || ''),
-      ent: String(a[C.ent2] == null ? '' : a[C.ent2]).trim(), ntr: String(a[C.ntr] == null ? '' : a[C.ntr]).trim()
+      // n° de transporte para prioridades: columna BK de la hoja Datos (indicado por el usuario)
+      ent: String(a[C.ent2] == null ? '' : a[C.ent2]).trim(), ntr: String(a[62] == null ? '' : a[62]).trim().replace(/\.0$/, '')
     });
   }
   const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
@@ -1431,7 +1432,9 @@ function ingest050(aoa, fname){
     const desc = String(a[C.desc] || '').trim();
     rows.push({cons, nave: String(a[C.nave] || '').trim(), fdest: dstr(a[C.fdest]),
       ped: String(a[C.ped] || '').trim(), cli: String(a[C.cli] || '').trim(),
-      ma: r3(ma), va: r3(va), desc, siames: /SIAMES/i.test(desc), unidad: String(a[C.unidad] || '').trim()});
+      ma: r3(ma), va: r3(va), desc, siames: /SIAMES/i.test(desc), unidad: String(a[C.unidad] || '').trim(),
+      // n° de transporte del 050: columna A (indicado por el usuario)
+      ntr: String(a[0] == null ? '' : a[0]).trim().replace(/\.0$/, '')});
   }
   const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
   E050 = {file: fname, fecha: m ? m[1] : dateToISO(new Date()), rows};
@@ -1579,12 +1582,26 @@ function refreshAll(){
 }
 
 // ================== ventana emergente (doble clic para ver detalle) ==================
-function openModal(ttl, html){
+let MODAL_XLS = null;
+function openModal(ttl, html, xls){
+  MODAL_XLS = xls || null;
+  $('modalXls').style.display = MODAL_XLS ? '' : 'none';
   $('modalTtl').innerHTML = ttl;
   $('modalBody').innerHTML = html;
   $('modalBg').classList.add('show');
 }
 function closeModal(){ $('modalBg').classList.remove('show'); }
+function xlsDef(nombre, aoa){
+  return {name: nombre.replace(/[\\\/:?*\[\]]/g, ' ').slice(0, 31), aoa,
+    file: ('detalle_' + nombre).normalize('NFD').replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').slice(0, 60) + '_' + dateToISO(new Date()) + '.xlsx'};
+}
+async function modalExcel(){
+  if (!MODAL_XLS) return;
+  const wb = new ExcelJS.Workbook();
+  addSheetTable(wb, MODAL_XLS.name, MODAL_XLS.aoa, 99);
+  const buf = await wb.xlsx.writeBuffer();
+  saveFile(MODAL_XLS.file, buf);
+}
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 // Detalle 073 por categoria: pedido / item (entrega) / cliente / ton
 const STK_MODAL_DEF = {
@@ -1600,24 +1617,45 @@ const STK_MODAL_DEF = {
   CHDIR: ['Chile Directo', ['CHDIR']], CHBOD: ['Chile Bodega Nacional', ['CHBOD']],
   SEMI: ['Semielaborado Redirigidos', ['SEMI']], P09: ['Almacén P09', ['P09']], OTROS_ALM: ['Otros almacenes', ['OTROS_ALM']]
 };
+function stkDetAgg(rows){
+  const agg = {};
+  rows.forEach(r => {
+    const k = r.ped + '||' + r.cli;
+    const o = agg[k] || (agg[k] = {ped: r.ped, cli: r.cli, pais: r.pais, dest: r.dest, libre: 0, fent: '', fstk: '', nave: r.nave, transp: r.transp, blq: r.blq});
+    o.libre += r.libre;
+    if (r.fent && (!o.fent || r.fent < o.fent)) o.fent = r.fent;
+    if (r.fstk && (!o.fstk || r.fstk < o.fstk)) o.fstk = r.fstk;
+    if (r.nave) o.nave = r.nave;
+    if (r.transp) o.transp = r.transp;
+  });
+  return Object.values(agg).sort((a, b) => b.libre - a.libre);
+}
+function stkDetTabla(list){
+  let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País</th><th>Destinatario</th><th class="num">Libre t</th><th>F. entrega</th><th>Fecha stk</th><th>Nave / transporte</th><th>Bloqueo</th></tr></thead><tbody>';
+  let t = 0;
+  list.forEach(o => {
+    t += o.libre;
+    h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td>${esc(o.cli)}</td><td>${esc(o.pais)}</td><td class="cli">${esc(o.dest)}</td><td class="num">${fmt(o.libre)}</td><td class="mono">${o.fent ? fdate(o.fent) : '—'}</td><td class="mono">${o.fstk ? fdate(o.fstk) : '—'}</td><td class="cli">${esc(o.nave || o.transp || '—')}</td><td>${o.blq ? `<span class="pill bad">${esc(o.blq)}</span>` : '—'}</td></tr>`;
+  });
+  h += `<tr class="tot"><td colspan="4">Total (${list.length} pedidos)</td><td class="num">${fmt(t)}</td><td colspan="4"></td></tr></tbody></table>`;
+  return h;
+}
+function stkDetAoa(list){
+  const aoa = [['Pedido','Cliente','País','Destinatario','Libre t','F. entrega','Fecha stk','Nave / transporte','Bloqueo']];
+  let t = 0;
+  list.forEach(o => { t += o.libre; aoa.push([o.ped, o.cli, o.pais, o.dest, r3(o.libre), o.fent ? fdate(o.fent) : '', o.fstk ? fdate(o.fstk) : '', o.nave || o.transp || '', o.blq || '']); });
+  aoa.push(['Total', '', '', '', r3(t), '', '', '', '']);
+  return aoa;
+}
 function stkModal(key){
   if (!STK) return;
   const def = STK_MODAL_DEF[key];
   if (!def) return;
   const rows = def[1] ? def[1].reduce((acc, c) => acc.concat(stkRowsDet(STKC, c)), []) : STK.rows.filter(r => r.centro === STKC);
   if (!rows.length) return toast('Sin pedidos en esta categoría');
-  const agg = {};
-  rows.forEach(r => {
-    const k = r.ped + '||' + (r.ent || '');
-    const o = agg[k] || (agg[k] = {ped: r.ped, ent: r.ent, cli: r.cli, t: 0});
-    o.t += r.libre;
-  });
-  const list = Object.values(agg).sort((a, b) => b.t - a.t);
-  let tt = 0;
-  let h = '<table><thead><tr><th>Pedido</th><th>Ítem (entrega)</th><th>Cliente</th><th class="num">Ton</th></tr></thead><tbody>';
-  list.forEach(o => { tt += o.t; h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td class="mono">${esc(o.ent) || '—'}</td><td>${esc(o.cli)}</td><td class="num">${fmt(o.t)}</td></tr>`; });
-  h += `<tr class="tot"><td colspan="3">Total (${list.length} ítems)</td><td class="num">${fmt(tt)}</td></tr></tbody></table>`;
-  openModal(`🧱 ${def[0]} — ${esc(STK.centros[STKC] || '')}`, h);
+  const list = stkDetAgg(rows);
+  const nombre = def[0] + ' ' + (STK.centros[STKC] || '');
+  openModal(`🧱 ${def[0]} — ${esc(STK.centros[STKC] || '')}`, stkDetTabla(list), xlsDef(nombre, stkDetAoa(list)));
 }
 // Detalle de una nave en Prioridades (detalle cartulinas): transporte / cliente / pedido / item
 function prioModal(cons, nave, sem){
@@ -1633,10 +1671,12 @@ function prioModal(cons, nave, sem){
   const list = Object.values(agg).sort((a, b) => b.t - a.t);
   let tt = 0;
   let h = '<table><thead><tr><th>Transporte</th><th>Cliente</th><th>Pedido</th><th>Ítem (pos)</th><th class="num">Ton</th></tr></thead><tbody>';
-  list.forEach(o => { tt += o.t; h += `<tr class="det"><td class="mono">${esc(o.ntr) || '—'}</td><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.pos) || '—'}</td><td class="num">${fmt(o.t)}</td></tr>`; });
+  const aoa = [['Transporte','Cliente','Pedido','Ítem (pos)','Ton']];
+  list.forEach(o => { tt += o.t; h += `<tr class="det"><td class="mono">${esc(o.ntr) || '—'}</td><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.pos) || '—'}</td><td class="num">${fmt(o.t)}</td></tr>`; aoa.push([o.ntr, o.cli, o.ped, o.pos, r3(o.t)]); });
   h += `<tr class="tot"><td colspan="4">Total pendiente (${list.length} posiciones)</td><td class="num">${fmt(tt)}</td></tr></tbody></table>`;
-  if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte se guarda desde ahora: vuelve a subir el detalle de cartulinas de hoy para verlo.</p>' + h;
-  openModal(`🚢 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar · stk máx ${fdate(stkMax(rows.map(r => r.fcd).filter(Boolean).sort()[0] || ''))}</span>`, h);
+  aoa.push(['Total', '', '', '', r3(tt)]);
+  if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte (columna BK de la hoja Datos) se guarda desde ahora: vuelve a subir el detalle de cartulinas de hoy para verlo.</p>' + h;
+  openModal(`🚢 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar · stk máx ${fdate(stkMax(rows.map(r => r.fcd).filter(Boolean).sort()[0] || ''))}</span>`, h, xlsDef('Nave ' + nave + ' ' + cons, aoa));
 }
 // Detalle de una nave en Prioridades 050: cliente / pedido / item / pesos por planta
 function prio050Modal(cons, nave, sem){
@@ -1644,15 +1684,19 @@ function prio050Modal(cons, nave, sem){
   if (!rows.length) return;
   const agg = {};
   rows.forEach(r => {
-    const o = agg[r.ped] || (agg[r.ped] = {ped: r.ped.split('/')[0], item: r.ped.includes('/') ? r.ped.split('/').slice(1).join('/') : '', cli: r.cli, ma: 0, va: 0});
+    const o = agg[r.ped] || (agg[r.ped] = {ped: r.ped.split('/')[0], item: r.ped.includes('/') ? r.ped.split('/').slice(1).join('/') : '', cli: r.cli, ntr: '', ma: 0, va: 0});
     o.ma = r3(o.ma + r.ma); o.va = r3(o.va + r.va);
+    if (r.ntr && !o.ntr) o.ntr = r.ntr;
   });
   const list = Object.values(agg).sort((a, b) => (b.ma + b.va) - (a.ma + a.va));
   let tm = 0, tv = 0;
-  let h = '<table><thead><tr><th>Cliente</th><th>Pedido</th><th>Ítem (pos)</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th class="num">Total</th></tr></thead><tbody>';
-  list.forEach(o => { tm += o.ma; tv += o.va; h += `<tr class="det"><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.item) || '—'}</td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td><td class="num"><b>${fmt(o.ma + o.va)}</b></td></tr>`; });
-  h += `<tr class="tot"><td colspan="3">Total (${list.length} ítems)</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td><td class="num">${fmt(tm + tv)}</td></tr></tbody></table>`;
-  openModal(`📌 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar (050)</span>`, h);
+  let h = '<table><thead><tr><th>Transporte</th><th>Cliente</th><th>Pedido</th><th>Ítem (pos)</th><th class="num">Maule t</th><th class="num">Valdivia t</th><th class="num">Total</th></tr></thead><tbody>';
+  const aoa = [['Transporte','Cliente','Pedido','Ítem (pos)','Maule t','Valdivia t','Total t']];
+  list.forEach(o => { tm += o.ma; tv += o.va; h += `<tr class="det"><td class="mono">${esc(o.ntr) || '—'}</td><td>${esc(o.cli)}</td><td class="mono">${esc(o.ped)}</td><td class="mono">${esc(o.item) || '—'}</td><td class="num">${o.ma > 0 ? fmt(o.ma) : '—'}</td><td class="num">${o.va > 0 ? fmt(o.va) : '—'}</td><td class="num"><b>${fmt(o.ma + o.va)}</b></td></tr>`; aoa.push([o.ntr, o.cli, o.ped, o.item, r3(o.ma), r3(o.va), r3(o.ma + o.va)]); });
+  h += `<tr class="tot"><td colspan="4">Total (${list.length} ítems)</td><td class="num">${fmt(tm)}</td><td class="num">${fmt(tv)}</td><td class="num">${fmt(tm + tv)}</td></tr></tbody></table>`;
+  aoa.push(['Total', '', '', '', r3(tm), r3(tv), r3(tm + tv)]);
+  if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte (columna A del 050) se guarda desde ahora: vuelve a subir el 050 de hoy para verlo.</p>' + h;
+  openModal(`📌 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar (050)</span>`, h, xlsDef('Nave 050 ' + nave + ' ' + cons, aoa));
 }
 function deco(t){
   const v = t === 'radar' || t === 'dotsWarn' ? '180,83,9' : '0,168,107';
@@ -2403,24 +2447,7 @@ function renderStockDet(){
   const cat = $('stkCat').value;
   const rows = stkRowsDet(STKC, cat);
   if (!rows.length){ $('tblStockDet').innerHTML = '<div class="empty">Sin filas en esta categoría.</div>'; return; }
-  const agg = {};
-  rows.forEach(r => {
-    const k = r.ped + '||' + r.cli;
-    const o = agg[k] || (agg[k] = {ped: r.ped, cli: r.cli, pais: r.pais, dest: r.dest, libre: 0, fent: '', fstk: '', nave: r.nave, transp: r.transp, blq: r.blq});
-    o.libre += r.libre;
-    if (r.fent && (!o.fent || r.fent < o.fent)) o.fent = r.fent;
-    if (r.fstk && (!o.fstk || r.fstk < o.fstk)) o.fstk = r.fstk;
-    if (r.nave) o.nave = r.nave;
-    if (r.transp) o.transp = r.transp;
-  });
-  let h = '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País</th><th>Destinatario</th><th class="num">Libre t</th><th>F. entrega</th><th>Fecha stk</th><th>Nave / transporte</th><th>Bloqueo</th></tr></thead><tbody>';
-  let t = 0;
-  Object.values(agg).sort((a, b) => b.libre - a.libre).forEach(o => {
-    t += o.libre;
-    h += `<tr class="det"><td class="mono">${esc(o.ped) || '—'}</td><td>${esc(o.cli)}</td><td>${esc(o.pais)}</td><td class="cli">${esc(o.dest)}</td><td class="num">${fmt(o.libre)}</td><td class="mono">${o.fent ? fdate(o.fent) : '—'}</td><td class="mono">${o.fstk ? fdate(o.fstk) : '—'}</td><td class="cli">${esc(o.nave || o.transp || '—')}</td><td>${o.blq ? `<span class="pill bad">${esc(o.blq)}</span>` : '—'}</td></tr>`;
-  });
-  h += `<tr class="tot"><td colspan="4">Total (${Object.keys(agg).length} pedidos)</td><td class="num">${fmt(t)}</td><td colspan="4"></td></tr></tbody></table>`;
-  $('tblStockDet').innerHTML = h;
+  $('tblStockDet').innerHTML = stkDetTabla(stkDetAgg(rows));
 }
 function setPlanta(pl){
   PLANTA = pl;
