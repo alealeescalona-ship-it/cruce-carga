@@ -24,6 +24,8 @@
 *{box-sizing:border-box}
 html{scrollbar-color:#cbd5e1 var(--bg)}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "IBM Plex Sans",-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+/* bosque sutil al pie (identidad forestal) */
+body::after{content:'';position:fixed;left:0;right:0;bottom:0;height:110px;pointer-events:none;opacity:.05;background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='300'%20height='110'%20viewBox='0%200%20300%20110'%3E%3Cg%20fill='%23116b4f'%3E%3Cpolygon%20points='30,34%206,110%2054,110'/%3E%3Cpolygon%20points='75,62%2058,110%2092,110'/%3E%3Cpolygon%20points='125,20%2092,110%20158,110'/%3E%3Cpolygon%20points='175,66%20160,110%20190,110'/%3E%3Cpolygon%20points='225,40%20196,110%20254,110'/%3E%3Cpolygon%20points='278,74%20262,110%20294,110'/%3E%3C/g%3E%3C/svg%3E") bottom left/300px 110px repeat-x}
 .wrap{max-width:1300px;margin:0 auto;padding:18px 16px}
 /* ===== Cabecera ===== */
 header.top{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 16px;margin-bottom:14px}
@@ -117,6 +119,18 @@ tr.tot td{font-weight:700;background:var(--strip);border-bottom:1px solid var(--
 /* ===== Pills / etiquetas ===== */
 .pill{display:inline-block;background:var(--chip);border-radius:999px;padding:1px 9px;font-size:11px;white-space:nowrap;font-weight:600}
 .pill.ok{background:var(--ok-bg);color:var(--ok-ink)} .pill.warn{background:var(--warn-bg);color:var(--warn-ink)} .pill.bad{background:var(--bad-bg);color:var(--bad-ink)}
+.pill.soon{background:#fef9c3;color:#854d0e}
+/* Estados operacionales: rojo=vencido, naranja=urgente, amarillo=proximo, verde=normal */
+.kpi.e-bad{border-left:4px solid #dc2626} .kpi.e-bad .val{color:#b91c1c}
+.kpi.e-warn{border-left:4px solid #ea580c} .kpi.e-warn .val{color:#c2410c}
+.kpi.e-soon{border-left:4px solid #eab308} .kpi.e-soon .val{color:#a16207}
+.kpi.e-ok{border-left:4px solid #16a34a} .kpi.e-ok .val{color:var(--ok-ink)}
+.kpi[ondblclick]{position:relative;cursor:pointer}
+.kpi[ondblclick]::after{content:'⛶';position:absolute;top:6px;right:9px;font-size:10px;color:var(--muted);opacity:.5}
+.kpi[ondblclick]:hover{border-color:rgba(0,168,107,.5)}
+.distbar{display:flex;height:30px;border-radius:9px;overflow:hidden;border:1px solid var(--line);margin-bottom:14px;box-shadow:var(--shadow)}
+.distbar div{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap;overflow:hidden;user-select:none}
+.distbar div:hover{filter:brightness(1.08)}
 .cli{color:var(--muted);font-size:12px}
 .mono{font-family:"IBM Plex Mono",Consolas,monospace;font-size:12px;white-space:nowrap}
 input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:pointer}
@@ -198,7 +212,10 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <!-- ============ TAB RESUMEN ============ -->
   <section id="sec_resumen" style="display:none">
-    <div class="seclbl">KPI</div>
+    <div class="seclbl">Estado de la operación — embarques por Stk Máximo</div>
+    <div class="kpis" id="resEstado"></div>
+    <div id="resDist"></div>
+    <div class="seclbl">KPI de gestión</div>
     <div class="kpis" id="resKpis"></div>
     <div class="secttl">Stock por grupo (073)</div>
     <div class="tblbox"><div id="resStock"></div></div>
@@ -265,13 +282,17 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <!-- ============ TAB PRIORIDADES ============ -->
   <section id="sec_prio" style="display:none">
-    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b>URGENTE ⚠️</b> = Stk Máximo entre hoy y 3 días más; <b>VENCIDA ⛔</b> = Stk Máximo ya pasado. <b>Doble clic en una nave</b> = ventana con transporte, cliente, pedido e ítem pendientes.</p>
+    <p class="note">Carga <b>gestionada</b> (marítimo · embarque real · status SM Pendiente) con stock en planta. <b>Stk Máximo</b> = fecha corte documental − 2 días; si cae sábado o domingo se adelanta a viernes. <b style="color:#b91c1c">VENCIDA ⛔</b> = Stk Máximo ya pasado · <b style="color:#c2410c">URGENTE ⚠️</b> = entre hoy y 3 días · <b style="color:#a16207">PRÓXIMA 🕒</b> = 4 a 5 días · <b style="color:#00875a">NORMAL ✅</b> = más de 5 días. <b>Doble clic en una nave</b> = ventana con transporte, cliente, pedido e ítem pendientes.</p>
     <div class="ctrl"><div class="filters">
       <select id="fPCons" onchange="renderPrio()"></select>
       <select id="fPNave" onchange="renderPrio()"></select>
       <select id="fPUrg" onchange="renderPrio()">
         <option value="">Urgencia: todas</option>
-        <option value="u">Solo vencidas y urgentes</option>
+        <option value="u">Vencidas + urgentes</option>
+        <option value="b">⛔ Solo vencidas</option>
+        <option value="w">⚠️ Solo urgentes</option>
+        <option value="s">🕒 Solo próximas</option>
+        <option value="n">✅ Solo normales</option>
       </select>
       <select id="fPOrden" onchange="renderPrio()">
         <option value="cons">Orden: consolidador y fecha</option>
@@ -1657,6 +1678,39 @@ function stkModal(key){
   const nombre = def[0] + ' ' + (STK.centros[STKC] || '');
   openModal(`🧱 ${def[0]} — ${esc(STK.centros[STKC] || '')}`, stkDetTabla(list), xlsDef(nombre, stkDetAoa(list)));
 }
+// Antiguedad 073: doble clic en un año o mes -> pedidos con cliente, pais, tons y estado
+function agingModal(anio, mes){
+  if (!STK) return;
+  const meses = stkAging(STKC).filter(o => mes ? o.key === mes : (anio === 'sin código' ? o.key === '0000' : o.key.slice(0, 4) === anio));
+  const agg = {};
+  meses.forEach(o => Object.values(o.peds || {}).forEach(pd => {
+    const q = agg[pd.ped] || (agg[pd.ped] = {ped: pd.ped, cli: pd.cli, pais: pd.pais, bloq: 0, porg: 0, sine: 0, tot: 0});
+    q.bloq += pd.bloq; q.porg += pd.porg; q.sine += pd.sine; q.tot += pd.tot;
+  }));
+  const list = Object.values(agg).sort((a, b) => b.tot - a.tot);
+  if (!list.length) return toast('Sin pedidos en este período');
+  const estadoDe = q => {
+    const p = [];
+    if (q.bloq > 0.05) p.push('<span class="pill bad">Bloqueado</span>');
+    if (q.sine > 0.05) p.push('<span class="pill warn">Sin entrega</span>');
+    if (q.porg > 0.05) p.push('<span class="pill soon">Por gestionar</span>');
+    return p.join(' ') || '<span class="pill ok">Gestionado</span>';
+  };
+  const estadoTxt = q => [q.bloq > 0.05 ? 'Bloqueado' : '', q.sine > 0.05 ? 'Sin entrega' : '', q.porg > 0.05 ? 'Por gestionar' : ''].filter(Boolean).join(' + ') || 'Gestionado';
+  let h = '<p class="note" style="padding:10px 12px 0">El semielaborado (SEMI) y el almacén P09 no entran en la antigüedad: se consultan en su categoría del cuadro.</p>';
+  h += '<table><thead><tr><th>Pedido</th><th>Cliente</th><th>País</th><th>Estado</th><th class="num">Bloqueo t</th><th class="num">Por gestionar t</th><th class="num">Sin entrega t</th><th class="num">Total t</th></tr></thead><tbody>';
+  const aoa = [['Pedido','Cliente','País','Estado','Bloqueo t','Por gestionar t','Sin entrega t','Total t']];
+  let tb = 0, tp = 0, ts = 0, tt = 0;
+  list.forEach(q => {
+    tb += q.bloq; tp += q.porg; ts += q.sine; tt += q.tot;
+    h += `<tr class="det"><td class="mono">${esc(q.ped) || '—'}</td><td>${esc(q.cli)}</td><td>${esc(q.pais)}</td><td>${estadoDe(q)}</td><td class="num">${q.bloq > 0.05 ? fmt(q.bloq) : '—'}</td><td class="num">${q.porg > 0.05 ? fmt(q.porg) : '—'}</td><td class="num">${q.sine > 0.05 ? `<span class="neg">${fmt(q.sine)}</span>` : '—'}</td><td class="num"><b>${fmt(q.tot)}</b></td></tr>`;
+    aoa.push([q.ped, q.cli, q.pais, estadoTxt(q), r3(q.bloq), r3(q.porg), r3(q.sine), r3(q.tot)]);
+  });
+  h += `<tr class="tot"><td colspan="4">Total (${list.length} pedidos)</td><td class="num">${fmt(tb)}</td><td class="num">${fmt(tp)}</td><td class="num">${fmt(ts)}</td><td class="num">${fmt(tt)}</td></tr></tbody></table>`;
+  aoa.push(['Total', '', '', '', r3(tb), r3(tp), r3(ts), r3(tt)]);
+  const lbl = mes ? mesLbl(mes) : anio;
+  openModal(`📅 Antigüedad ${esc(lbl)} — ${esc(STK.centros[STKC] || '')}`, h, xlsDef('Antiguedad ' + lbl + ' ' + (STK.centros[STKC] || ''), aoa));
+}
 // Detalle de una nave en Prioridades (detalle cartulinas): transporte / cliente / pedido / item
 function prioModal(cons, nave, sem){
   const rows = gPend().filter(r => r.cons === cons && r.nave === nave && ((r.fcd ? semanaMartes(r.fcd).key : '') === sem));
@@ -1705,7 +1759,19 @@ function deco(t){
   if (t === 'radar') return s + `<circle cx="23" cy="23" r="20" fill="none" stroke-width="2" style="stroke:rgba(${v},.25)"/><circle cx="23" cy="23" r="12" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/><path d="M23 23 L23 3 A20 20 0 0 1 40.3 13 Z" style="fill:rgba(${v},.28)"/><circle cx="23" cy="23" r="3" style="fill:rgba(${v},.6)"/></svg>`;
   return s + `<path d="M8 33 L20 15 L30 25 L39 9" fill="none" stroke-width="2" style="stroke:rgba(${v},.35)"/>` + [[8,33],[20,15],[30,25],[39,9]].map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" style="fill:rgba(${v},.7)"/>`).join('') + '</svg>';
 }
-const RING_TONOS = {brand: ['0,168,107', 'var(--brand)'], warn: ['180,83,9', '#b45309'], bad: ['185,28,28', '#b91c1c'], gray: ['100,116,139', '#64748b']};
+const RING_TONOS = {brand: ['0,168,107', 'var(--brand)'], warn: ['234,88,12', '#ea580c'], bad: ['220,38,38', '#dc2626'], soon: ['234,179,8', '#eab308'], gray: ['100,116,139', '#64748b']};
+// Urgencia -> clase de pill y marca (rojo=vencido, naranja=urgente, amarillo=proximo, verde=normal)
+function urgPill(u){
+  if (u === 'bad') return {cls: 'pill bad', mark: ' ⛔'};
+  if (u === 'warn') return {cls: 'pill warn', mark: ' ⚠️'};
+  if (u === 'soon') return {cls: 'pill soon', mark: ' 🕒'};
+  return {cls: 'pill ok', mark: ''};
+}
+// Navegacion directa desde los indicadores del Resumen
+function irTab(m){ setMain(m); window.scrollTo({top: 0}); }
+function irPrio(u){ $('fPUrg').value = u; irTab('prio'); }
+function irCargaTab(t){ setMain('carga'); setTab(t); window.scrollTo({top: 0}); }
+function irSaldos(){ irCargaTab('S'); }
 function ring(pct, tono){
   const tn = RING_TONOS[tono || 'brand'] || RING_TONOS.brand;
   const r = 15.9, c = 2 * Math.PI * r;
@@ -1846,21 +1912,58 @@ function cieSaldosPorCentro(){
 }
 // ================== TAB RESUMEN ==================
 function renderResumen(){
+  // ---- Estado de la operacion: vencidos / urgentes / proximos / normales (por Stk Maximo del detalle)
+  let ke = '', dist = '';
+  if (DET){
+    const plist = prioData();
+    const E = {bad: {n: 0, t: 0}, warn: {n: 0, t: 0}, soon: {n: 0, t: 0}, ok: {n: 0, t: 0}};
+    plist.forEach(x => { const e = E[urgency(x.stk)] || E.ok; e.n++; e.t += x.ma + x.va; });
+    const totN = plist.length || 1;
+    const cardE = (cls, tono, lbl, e, f, tip) =>
+      `<div class="kpi kpr ${cls}" title="${tip} — doble clic: ver esas naves en Prioridades" ondblclick="irPrio('${f}')"><div><div class="lbl">${lbl}</div><div class="val">${e.n}</div><div class="det">${fmt(e.t)} t · ${e.n === 1 ? '1 nave' : e.n + ' naves'}</div></div>${ring(e.n / totN * 100, tono)}</div>`;
+    ke = cardE('e-bad', 'bad', '⛔ Vencidos', E.bad, 'b', 'Stk Máximo ya pasado') +
+      cardE('e-warn', 'warn', '⚠️ Urgentes', E.warn, 'w', 'Stk Máximo entre hoy y 3 días') +
+      cardE('e-soon', 'soon', '🕒 Próximos', E.soon, 's', 'Stk Máximo en 4 a 5 días') +
+      cardE('e-ok', 'brand', '✅ Normales', E.ok, 'n', 'Stk Máximo a más de 5 días');
+    const DC = [['bad','#dc2626','Vencidos','b'], ['warn','#ea580c','Urgentes','w'], ['soon','#eab308','Próximos','s'], ['ok','#16a34a','Normales','n']];
+    const tT = E.bad.t + E.warn.t + E.soon.t + E.ok.t;
+    if (tT > 0){
+      dist = '<div class="distbar" title="Toneladas pendientes por estado">' + DC.map(([u, color, lbl, f]) => {
+        const e = E[u];
+        if (e.t <= 0) return '';
+        const pc = e.t / tT * 100;
+        return `<div style="background:${color};flex:${pc.toFixed(2)} 1 0%${u === 'soon' ? ';color:#713f12' : ''}" title="${lbl}: ${fmt(e.t)} t (${pc.toFixed(0)}%) — doble clic: ver en Prioridades" ondblclick="irPrio('${f}')">${pc >= 9 ? lbl + ' · ' + nf0.format(e.t) + ' t' : ''}</div>`;
+      }).join('') + '</div>';
+    }
+  }
+  $('resEstado').innerHTML = ke;
+  $('resDist').innerHTML = dist;
+  // ---- KPIs de gestion
   let k = '';
   if (DET){
     let gm = 0, gv = 0, nm = 0, nv = 0;
     gPend().forEach(r => { gm += r.ma; gv += r.va; });
     nRows().forEach(r => { nm += r.ma; nv += r.va; });
-    k += `<div class="kpi kpr g"><div><div class="lbl">Carga gestionada</div><div class="val">${fmt(gm + gv)} t</div><div class="det">Maule ${fmt(gm)} · Valdivia ${fmt(gv)}</div></div>${deco('rip')}</div>`;
-    k += `<div class="kpi kpr n hl"><div><div class="lbl">Carga no gestionada</div><div class="val">${fmt(nm + nv)} t</div><div class="det">Maule ${fmt(nm)} · Valdivia ${fmt(nv)}</div></div>${deco('radar')}</div>`;
+    k += `<div class="kpi kpr g" title="Doble clic: abrir Carga gestionada" ondblclick="irCargaTab('G')"><div><div class="lbl">Carga gestionada</div><div class="val">${fmt(gm + gv)} t</div><div class="det">Maule ${fmt(gm)} · Valdivia ${fmt(gv)}</div></div>${deco('rip')}</div>`;
+    k += `<div class="kpi kpr n hl" title="Doble clic: abrir Carga no gestionada" ondblclick="irCargaTab('N')"><div><div class="lbl">Carga no gestionada</div><div class="val">${fmt(nm + nv)} t</div><div class="det">Maule ${fmt(nm)} · Valdivia ${fmt(nv)}</div></div>${deco('radar')}</div>`;
   }
   ['Maule','Valdivia'].forEach(pl => {
     const pc = planCalc(pl);
     let sp = 0, sd = 0;
     pc.rows.forEach(x => { sp += x.prog; sd += x.desp; });
-    if (sp > 0 || sd > 0) k += `<div class="kpi kpr" title="Avance del día: UT despachadas sobre programadas"><div><div class="lbl">UT ${pl}</div><div class="val">${fmtU(sd)} / ${fmtU(sp)}</div><div class="det">despachadas / programadas</div></div>${ring(sp > 0 ? sd / sp * 100 : 0)}</div>`;
+    if (sp > 0 || sd > 0) k += `<div class="kpi kpr" title="Avance del día: UT despachadas sobre programadas — doble clic: abrir Planificación" ondblclick="irTab('plan')"><div><div class="lbl">UT ${pl}</div><div class="val">${fmtU(sd)} / ${fmtU(sp)}</div><div class="det">despachadas / programadas</div></div>${ring(sp > 0 ? sd / sp * 100 : 0)}</div>`;
   });
-  if (DET && DET.alert) k += `<div class="kpi kpr ${DET.alert.length ? 'n' : 'g'}"><div><div class="lbl">Stock repartido</div><div class="val">${DET.alert.length}</div><div class="det">embarques en 2+ consolidadores</div></div>${deco(DET.alert.length ? 'dotsWarn' : 'dots')}</div>`;
+  if (STK){
+    let stot = 0;
+    STK.rows.forEach(r => stot += r.libre);
+    k += `<div class="kpi kpr" title="Stock 073 de todos los centros — doble clic: abrir Stock 073" ondblclick="irTab('stock')"><div><div class="lbl">Stock disponible (073)</div><div class="val">${nf0.format(stot)} t</div><div class="det">${Object.keys(STK.centros).length} centros</div></div>${deco('rip')}</div>`;
+  }
+  if (DET && DET.saldos && DET.saldos.length){
+    let sw = 0;
+    DET.saldos.forEach(s => sw += s.tot);
+    k += `<div class="kpi kpr ${sw > 0 ? 'n' : 'g'}" title="Saldos de embarques contabilizados — doble clic: abrir Saldos" ondblclick="irSaldos()"><div><div class="lbl">Saldos pendientes</div><div class="val">${fmt(sw)} t</div><div class="det">${DET.saldos.length} naves con saldo</div></div>${deco(sw > 0 ? 'dotsWarn' : 'dots')}</div>`;
+  }
+  if (DET && DET.alert) k += `<div class="kpi kpr ${DET.alert.length ? 'n' : 'g'}" title="Doble clic: abrir Stock repartido" ondblclick="irCargaTab('A')"><div><div class="lbl">Stock repartido</div><div class="val">${DET.alert.length}</div><div class="det">embarques en 2+ consolidadores</div></div>${deco(DET.alert.length ? 'dotsWarn' : 'dots')}</div>`;
   $('resKpis').innerHTML = k || '<div class="empty">Sube el detalle de cartulinas para ver el resumen de carga.</div>';
   // Stock por grupo (sin desgloses)
   if (STK){
@@ -1973,8 +2076,8 @@ function renderResumen(){
     if (urg.length){
       let h = '<table><thead><tr><th>Nave</th><th>Consolidador</th><th>Stk Máximo</th><th>Corte doc.</th><th class="num">Maule t</th><th class="num">Valdivia t</th></tr></thead><tbody>';
       urg.forEach(x => {
-        const u = urgency(x.stk);
-        h += `<tr class="det"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="pill ${u === 'bad' ? 'bad' : 'warn'} mono"><b>${fdate(x.stk)}</b>${u === 'bad' ? ' ⛔' : ' ⚠️'}</span></td><td class="mono">${fdate(x.fcd)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+        const up = urgPill(urgency(x.stk));
+        h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prioModal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td><b>${esc(x.nave)}</b></td><td>${esc(x.cons)}</td><td><span class="${up.cls} mono"><b>${fdate(x.stk)}</b>${up.mark}</span></td><td class="mono">${fdate(x.fcd)}</td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
       });
       h += '</tbody></table>';
       $('resNaves').innerHTML = h;
@@ -2104,20 +2207,32 @@ function renderSim(){
   });
   h += '</tbody></table>';
   $('tblSim').innerHTML = h;
-  // Historico
+  // Historico agrupado por mes (clic en el mes = ver los dias)
   const fechas = Object.keys(HIST).sort().reverse();
   if (fechas.length){
-    let h2 = '<table style="min-width:420px"><thead><tr><th>Fecha 073</th>' + keys.map(c => `<th class="num">${esc(centros[c])} t</th>`).join('') + '</tr></thead><tbody>';
-    fechas.forEach(f => {
-      h2 += `<tr class="det"><td class="mono">${fdate(f)}</td>` + keys.map(c => {
-        const gg = HIST[f].g && HIST[f].g[c];
-        return `<td class="num">${gg ? nf0.format(gg.total) : '—'}</td>`;
-      }).join('') + '</tr>';
+    const porMes = {};
+    const ordenMes = [];
+    fechas.forEach(f => { const mk = f.slice(0, 7); if (!porMes[mk]){ porMes[mk] = []; ordenMes.push(mk); } porMes[mk].push(f); });
+    let h2 = '<table style="min-width:420px"><thead><tr><th>Mes / día 073</th>' + keys.map(c => `<th class="num">${esc(centros[c])} t</th>`).join('') + '</tr></thead><tbody>';
+    ordenMes.forEach(mk => {
+      const dias = porMes[mk];
+      const abierto = HISTM_OPEN.has(mk);
+      const ult = dias[0];
+      h2 += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="histMesToggle('${mk}')" title="Clic: ver los días de este mes · la fila muestra la última foto del mes"><td><span class="caret">▾</span><b>${(MES_NOM[+mk.slice(5, 7)] || mk)} ${mk.slice(0, 4)}</b> <span class="cnt">· ${dias.length} ${dias.length === 1 ? 'día' : 'días'} · último ${fdate(ult)}</span></td>` +
+        keys.map(c => { const gg = HIST[ult].g && HIST[ult].g[c]; return `<td class="num"><b>${gg ? nf0.format(gg.total) : '—'}</b></td>`; }).join('') + '</tr>';
+      if (abierto) dias.forEach(f => {
+        h2 += `<tr class="det"><td class="mono" style="padding-left:28px">${fdate(f)}</td>` + keys.map(c => {
+          const gg = HIST[f].g && HIST[f].g[c];
+          return `<td class="num">${gg ? nf0.format(gg.total) : '—'}</td>`;
+        }).join('') + '</tr>';
+      });
     });
     h2 += '</tbody></table>';
     $('tblHist').innerHTML = h2;
   } else $('tblHist').innerHTML = '<div class="empty">Aún no hay histórico: se guarda una foto cada día que subas el 073.</div>';
 }
+const HISTM_OPEN = new Set([dateToISO(new Date()).slice(0, 7)]);
+function histMesToggle(mk){ if (HISTM_OPEN.has(mk)) HISTM_OPEN.delete(mk); else HISTM_OPEN.add(mk); renderSim(); }
 // ================== CORREO PLANIFICACION ==================
 function copyCorreo(){
   if (!DET) return toast('Sube el detalle primero');
@@ -2184,7 +2299,7 @@ function copyCorreo(){
       `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:11pt"><tr><td style="${th}">Consolidador</td><td style="${th}">Corte doc.</td><td style="${th}">Stk Máximo</td><td style="${th}">Nave</td><td style="${th}">Maule t</td><td style="${th}">Valdivia t</td></tr>`;
     priosC.forEach(x => {
       const u = urgency(x.stk);
-      const stkStyle = u === 'bad' ? 'background:#dc1e1e;color:#fff;font-weight:bold;' : (u === 'warn' ? 'background:#f5c26b;font-weight:bold;' : '');
+      const stkStyle = u === 'bad' ? 'background:#dc1e1e;color:#fff;font-weight:bold;' : (u === 'warn' ? 'background:#f5c26b;font-weight:bold;' : (u === 'soon' ? 'background:#fef08a;font-weight:bold;' : ''));
       t5 += `<tr><td style="${td}">${esc(x.cons)}</td><td style="${td}text-align:center">${fdate(x.fcd)}</td><td style="${td}text-align:center;${stkStyle}">${fdate(x.stk)}</td><td style="${td}"><b>${esc(x.nave)}</b></td><td style="${td}text-align:center">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td style="${td}text-align:center">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
     });
     t5 += '</table>';
@@ -2400,13 +2515,13 @@ function renderStock(){
       tb += ab; tpq += ap; ts += as; tt += at;
       const abierto = AGE_OPEN.has(a);
       const viejo = a !== 'sin código' && a < anioAct;
-      ha += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="ageToggle('${esc(a)}')"><td><span class="caret">▾</span>${viejo ? `<span class="pill bad"><b>${esc(a)}</b></span>` : `<b>${esc(a)}</b>`} <span class="cnt">· ${g.length} meses</span></td>` +
+      ha += `<tr class="grp ${abierto ? '' : 'closed'}" onclick="ageToggle('${esc(a)}')" title="Clic: desplegar meses · Doble clic: ventana con pedidos del año" ondblclick="agingModal(this.dataset.a, '')" data-a="${esc(a)}"><td><span class="caret">▾</span>${viejo ? `<span class="pill bad"><b>${esc(a)}</b></span>` : `<b>${esc(a)}</b>`} <span class="cnt">· ${g.length} meses</span></td>` +
         `<td class="num"><b>${ab > 0.5 ? nf0.format(ab) : '—'}</b></td><td class="num"><b>${ap > 0.5 ? nf0.format(ap) : '—'}</b></td>` +
         `<td class="num">${as > 0.5 ? `<span class="neg"><b>${nf0.format(as)}</b></span>` : '—'}</td><td class="num"><b>${nf0.format(at)}</b></td></tr>`;
       if (abierto) g.forEach(o => {
         const mesAbierto = AGEM_OPEN.has(o.key);
         const nPeds = Object.keys(o.peds || {}).length;
-        ha += `<tr class="grp ${mesAbierto ? '' : 'closed'}" onclick="ageMesToggle('${esc(o.key)}')" style="font-weight:600"><td style="padding-left:26px"><span class="caret">▾</span>${esc(o.lbl)} <span class="cnt">· ${nPeds} pedidos</span></td>` +
+        ha += `<tr class="grp ${mesAbierto ? '' : 'closed'}" onclick="ageMesToggle('${esc(o.key)}')" title="Clic: desplegar pedidos · Doble clic: ventana con detalle del mes" ondblclick="agingModal('', this.dataset.k)" data-k="${esc(o.key)}" style="font-weight:600"><td style="padding-left:26px"><span class="caret">▾</span>${esc(o.lbl)} <span class="cnt">· ${nPeds} pedidos</span></td>` +
           `<td class="num">${o.bloq > 0.5 ? nf0.format(o.bloq) : '—'}</td><td class="num">${o.porg > 0.5 ? nf0.format(o.porg) : '—'}</td>` +
           `<td class="num">${o.sine > 0.5 ? `<span class="neg">${nf0.format(o.sine)}</span>` : '—'}</td><td class="num">${nf0.format(o.tot)}</td></tr>`;
         if (mesAbierto) Object.values(o.peds || {}).sort((x, y) => y.tot - x.tot).forEach(pd => {
@@ -2773,6 +2888,10 @@ function prioView(){
   if (fc) list = list.filter(x => x.cons === fc);
   if (fn) list = list.filter(x => x.nave === fn);
   if (fu === 'u') list = list.filter(x => ['bad','warn'].includes(urgency(x.stk)));
+  else if (fu === 'b') list = list.filter(x => urgency(x.stk) === 'bad');
+  else if (fu === 'w') list = list.filter(x => urgency(x.stk) === 'warn');
+  else if (fu === 's') list = list.filter(x => urgency(x.stk) === 'soon');
+  else if (fu === 'n') list = list.filter(x => urgency(x.stk) === '');
   const ord = $('fPOrden').value || 'cons';
   if (ord === 'fcd') list.sort((a, b) => (a.fcd + a.nave).localeCompare(b.fcd + b.nave));
   else if (ord === 'nave') list.sort((a, b) => (a.nave + a.fcd).localeCompare(b.nave + b.fcd));
@@ -2793,10 +2912,8 @@ function renderPrio(){
   const subtotal = () => { if (conSub && cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
   list.forEach(x => {
     if (conSub && x.cons !== cur){ subtotal(); cur = x.cons; sm = 0; sv = 0; }
-    const u = urgency(x.stk);
-    const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
-    const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-    h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prioModal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td class="mono">${fdate(x.fcd)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+    const up = urgPill(urgency(x.stk));
+    h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prioModal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td class="mono">${fdate(x.fcd)}</td><td><span class="${up.cls} mono"><b>${fdate(x.stk)}</b>${up.mark}</span></td><td><b>${esc(x.nave)}</b></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
     sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
   });
   subtotal();
@@ -2819,10 +2936,8 @@ function renderPrio050(){
     const sub = () => { if (cur !== null) h += `<tr class="tot"><td colspan="4">Total ${esc(cur)}</td><td class="num">${fmt(sm)}</td><td class="num">${fmt(sv)}</td></tr>`; };
     list.forEach(x => {
       if (x.cons !== cur){ sub(); cur = x.cons; sm = 0; sv = 0; }
-      const u = urgency(x.stk);
-      const pill = u === 'bad' ? 'pill bad' : (u === 'warn' ? 'pill warn' : 'pill');
-      const mark = u === 'bad' ? ' ⛔' : (u === 'warn' ? ' ⚠️' : '');
-      h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prio050Modal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td><b>${esc(x.nave)}</b></td><td class="mono">${fdate(x.fdest)}</td><td><span class="${pill} mono"><b>${fdate(x.stk)}</b>${mark}</span></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
+      const up = urgPill(urgency(x.stk));
+      h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver pedidos pendientes de esta nave" ondblclick="prio050Modal(this.dataset.c, this.dataset.n, this.dataset.s)" data-c="${esc(x.cons)}" data-n="${esc(x.nave)}" data-s="${esc(x.sem || '')}"><td>${esc(x.cons)}</td><td><b>${esc(x.nave)}</b></td><td class="mono">${fdate(x.fdest)}</td><td><span class="${up.cls} mono"><b>${fdate(x.stk)}</b>${up.mark}</span></td><td class="num">${x.ma > 0 ? fmt(x.ma) : '—'}</td><td class="num">${x.va > 0 ? fmt(x.va) : '—'}</td></tr>`;
       sm += x.ma; sv += x.va; tm += x.ma; tv += x.va;
     });
     sub();
@@ -2848,7 +2963,7 @@ function copyPrio(){
   list.forEach(x => {
     if (x.cons !== cur){ cur = x.cons; lines.push('', cur + ':'); }
     const u = urgency(x.stk);
-    const mark = u === 'bad' ? ' [VENCIDA]' : (u === 'warn' ? ' [URGENTE]' : '');
+    const mark = u === 'bad' ? ' [VENCIDA]' : (u === 'warn' ? ' [URGENTE]' : (u === 'soon' ? ' [PROXIMA]' : ''));
     const tons = (x.ma > 0 ? fmt(x.ma) + ' t Maule' : '') + (x.ma > 0 && x.va > 0 ? ' + ' : '') + (x.va > 0 ? fmt(x.va) + ' t Valdivia' : '');
     lines.push(`  ${x.nave} — stk máximo ${fdate(x.stk)} (corte doc ${fdate(x.fcd)}) — ${tons}${mark}`);
   });
@@ -3587,7 +3702,8 @@ function exportPDF(){
         if (ai >= 0){
           const al = fila[ai];
           if (al === 'VENCIDO'){ d.cell.styles.fillColor = [249, 205, 200]; d.cell.styles.textColor = [140, 35, 25]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
-          else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 230, 190]; d.cell.styles.textColor = [130, 80, 10]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+          else if (al === 'URGENTE'){ d.cell.styles.fillColor = [253, 215, 170]; d.cell.styles.textColor = [154, 52, 18]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
+          else if (al === 'PROXIMO'){ d.cell.styles.fillColor = [254, 249, 195]; d.cell.styles.textColor = [133, 77, 14]; if (d.column.index === ai) d.cell.styles.fontStyle = 'bold'; }
         }
       }
     });
