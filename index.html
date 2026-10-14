@@ -68,12 +68,6 @@ h1.hola b{font-weight:700}
 .band2{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:12px;align-items:start;margin-bottom:14px}
 .filecol{flex-direction:column;align-items:stretch}
 .filecol .dchip{justify-content:flex-start}
-.pipe{margin-bottom:14px}
-.pipeflow{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.pnode{background:#eef2f6;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:11.5px;font-weight:600;white-space:nowrap}
-.pnode.dark{background:#0f5132;border-color:#0f5132;color:#fff;box-shadow:var(--glow)}
-.pnode.fin{background:var(--ok-bg);border-color:rgba(0,168,107,.35);color:var(--ok-ink)}
-.parr{color:var(--brand);font-weight:700}
 .dchip{display:inline-flex;align-items:center;gap:5px;background:#e9edf2;border:1px solid transparent;border-radius:8px;padding:5px 12px;font-size:11.5px;cursor:pointer;color:#475569;transition:border-color .15s}
 .dchip b{color:var(--ink)}
 .dchip.ok{background:#fff;border-color:var(--line);color:var(--ink)}
@@ -298,19 +292,6 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
           <span class="dchip miss" id="chip050" onclick="openUpload()">📌 050: sin datos</span>
         </div>
         <button class="btn verde" onclick="openUpload()" style="width:100%;margin-top:10px">⬆ Gestionar archivos</button>
-      </div>
-    </div>
-    <div class="card pipe">
-      <div class="cardh"><b>🔗 Cruce de información</b><span class="prog" style="font-size:11.5px">Integramos las fuentes para generar información útil</span></div>
-      <div class="pipeflow">
-        <span class="pnode">📄 Detalle</span><span class="parr">→</span>
-        <span class="pnode">🏭 SAP 078</span><span class="parr">→</span>
-        <span class="pnode">🚚 Transporte</span><span class="parr">→</span>
-        <span class="pnode">🧱 Stock 073</span><span class="parr">→</span>
-        <span class="pnode">⚓ Saldo W</span><span class="parr">→</span>
-        <span class="pnode">📌 050</span><span class="parr">→</span>
-        <span class="pnode dark">🍃 CRUCE CARGA</span><span class="parr">→</span>
-        <span class="pnode fin">Prioridades · Alertas · Planificación</span>
       </div>
     </div>
     <div class="seclbl">KPI de gestión</div>
