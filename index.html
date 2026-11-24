@@ -451,7 +451,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <p class="note" id="llegNote"></p>
     <div class="tblbox"><div id="tblLleg"></div></div>
     <div class="secttl">⏮ Despachado días anteriores (0782) → embarques pendientes</div>
-    <p class="note" id="nota0782">Archivo <b>0782</b> (mismo formato que la 078; <b>la hoja o el archivo debe llamarse "0782"</b>): despachos de días anteriores hacia 1890, 1826, 1803 Cerrillos, 1807 Bod. Nacional, 1808 La Divisa, 1829 DYC THNO y 1861 Internacional, más los despachos a clientes <b>Edipac / MM Packaging</b> solo con guía de salida. Cada pedido se cruza con los embarques <b>Pendientes</b> de la hoja Datos para traer su nave y corte documental. Agrupado por mes → día → consolidador → nave.</p>
+    <p class="note" id="nota0782">Archivo <b>0782</b> (mismo formato que la 078; <b>la hoja o el archivo debe llamarse "0782"</b>): despachos de días anteriores hacia 1890 DYC SAI, 1893 PC Valp, 1826 P. Coronel, 1803 Cerrillos, 1807 Bod. Nacional, 1808 La Divisa, 1829 DYC THNO y 1861 Internacional, más los despachos a clientes <b>Edipac / MM Packaging</b> solo con guía de salida. Cada pedido se cruza con los embarques <b>Pendientes</b> de la hoja Datos para traer su nave y corte documental. Agrupado por mes → día → consolidador → nave.</p>
     <div class="tblbox"><div id="tbl0782"></div></div>
     <div class="secttl">Programa del día vs despachado — <span id="plName2"></span></div>
     <p class="note" id="planNote"></p>
@@ -1051,7 +1051,9 @@ async function handleFiles(files){
             if (hs.includes('cantidad') && (hs.includes('lote') || hs.includes('cmv') || hs.includes('fe.contab.'))){ hi0 = hr; break; }
           }
           const n82 = ingest0782(hi0 > 0 ? aoa.slice(hi0) : aoa, f.name);
-          encontrados.push(n82 > 0 ? `0782: ${n82} despachos a consolidadores/clientes guardados en el historial` : '0782 reconocido pero con 0 despachos útiles (revisa Fe.contab., Ce. 1801/1802, Cantidad y el 2° Centro destino)');
+          encontrados.push(n82.n > 0
+            ? `0782: ${n82.n} despachos al historial (${Object.keys(n82.porCons).sort().map(c => c + ' ' + n82.porCons[c]).join(' · ')})`
+            : '0782 reconocido pero con 0 despachos útiles (revisa Fe.contab., Ce. 1801/1802, Cantidad y el Centro destino)');
         } else if (heads.includes('pedido sap') && heads.includes('nave') && heads.includes('consolidador')){
           ingestDetalle(aoa, f.name); encontrados.push('detalle');
         } else if (heads.includes('lote') && heads.includes('cmv') && heads.includes('cantidad')){
@@ -2018,16 +2020,28 @@ function prio050Modal(cons, nave, sem){
 // ================== 0782: DESPACHADO POR PLANTA DIAS ANTERIORES ==================
 // Misma estructura que la 078; destino = SEGUNDA columna 'Centro' (centro 2). Se toman los despachos a
 // 1890/1826/1803/1807/1808/1829/1861 y los a clientes Edipac / MM Packaging SOLO con guia de salida.
-const CONS_0782 = {'1890':'DYC SAI','1826':'Puerto Coronel','1803':'Cerrillos','1807':'Bodega Nacional','1808':'La Divisa','1829':'DYC THNO','1861':'Internacional'};
+const CONS_0782 = {'1890':'DYC SAI','1893':'PC Valp','1826':'Puerto Coronel','1803':'Cerrillos','1807':'Bodega Nacional','1808':'La Divisa','1829':'DYC THNO','1861':'Internacional'};
 function ingest0782(aoa, fname){
   const heads = aoa[0].map(norm);
   const ix = {};
   heads.forEach((h, i) => { if (!(h in ix)) ix[h] = i; });
   const col = (n, fb) => ix[n] !== undefined ? ix[n] : fb;
-  let c2i = -1, vistos = 0;
-  heads.forEach((h, i) => { if (h === 'centro'){ vistos++; if (vistos === 2 && c2i < 0) c2i = i; } });
-  if (c2i < 0) c2i = 40;
   const C = {fe: col('fe.contab.', 1), ce: col('ce.', 3), ped: col('ped.clte.', 12), cant: col('cantidad', 14), sol: col('solicitante', 30), guia: col('guia despacho salida', 33)};
+  // columna del CENTRO DESTINO (centro 2): entre las columnas 'centro*', la que más códigos de centro reales contenga
+  const CODS = {'1801':1,'1802':1,'1803':1,'1807':1,'1808':1,'1811':1,'1821':1,'1822':1,'1826':1,'1828':1,'1829':1,'1861':1,'1890':1,'1893':1};
+  const candidatos = [];
+  heads.forEach((h, i) => { if (i !== C.ce && (h === 'centro' || h === 'centro 2' || h === 'centro2' || h === 'centro destino')) candidatos.push(i); });
+  if (!candidatos.length) candidatos.push(40);
+  let c2i = candidatos[0], mejor = -1;
+  candidatos.forEach(i => {
+    let sc = 0;
+    for (let r = 1; r < Math.min(aoa.length, 400); r++){
+      const a = aoa[r]; if (!a) continue;
+      const v = String(a[i] == null ? '' : a[i]).trim().replace(/\.0$/, '');
+      if (CODS[v]) sc++;
+    }
+    if (sc > mejor){ mejor = sc; c2i = i; }
+  });
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r]; if (!a) continue;
@@ -2058,7 +2072,9 @@ function ingest0782(aoa, fname){
   HIST0782.file = fname;
   lsSet('cruceHist0782', HIST0782);
   hist0782Resolve();
-  return rows.length;
+  const porCons = {};
+  rows.forEach(r => porCons[r.cons] = (porCons[r.cons] || 0) + 1);
+  return {n: rows.length, porCons};
 }
 // Congela el cruce pedido -> nave/corte con los pendientes de Datos (solo completa lo no resuelto)
 function hist0782Resolve(){
@@ -2125,7 +2141,7 @@ function render0782(){
   if (!el) return;
   const dias = data0782();
   if (!dias){
-    nEl.innerHTML = 'Archivo <b>0782</b> (mismo formato que la 078; <b>la hoja o el archivo debe llamarse "0782"</b>): despachos a 1890, 1826, 1803, 1807, 1808, 1829 y 1861, más clientes Edipac / MM Packaging con guía de salida. <b>Cada día subido queda guardado en un historial</b> (resubir un día lo reemplaza) y se agrupa por mes cuando crece.';
+    nEl.innerHTML = 'Archivo <b>0782</b> (mismo formato que la 078; <b>la hoja o el archivo debe llamarse "0782"</b>): despachos a 1890, 1893, 1826, 1803, 1807 Bod. Nacional, 1808, 1829 y 1861 Internacional, más clientes Edipac / MM Packaging con guía de salida. <b>Cada día subido queda guardado en un historial</b> (resubir un día lo reemplaza) y se agrupa por mes cuando crece.';
     el.innerHTML = '<div class="empty">Sube el archivo <b>0782</b> para empezar el historial de despachos.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
     return;
   }
