@@ -252,7 +252,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <div class="upzone" id="upzone">
     <h2>Sube tus archivos Excel del día (puedes soltar varios a la vez)</h2>
-    <p>1) <b>Detalle cartulinas</b> (hoja "Datos") · 2) <b>SAP 078</b> (despachos) · 3) <b>Programa Transporte</b> (OT-GDE) · 4) <b>073</b> (stock) · 5) <b>Saldo W</b> (cierres + base) · 6) <b>050</b> (embarques)</p>
+    <p>1) <b>Detalle cartulinas</b> (hoja "Datos") · 2) <b>SAP 078</b> (despachos) · 3) <b>Programa Transporte</b> (OT-GDE) · 4) <b>073</b> (stock) · 5) <b>Saldo W</b> (cierres + base) · 6) <b>050</b> (embarques) · 7) <b>0782</b> (despachado días anteriores — el nombre del archivo debe incluir "0782")</p>
     <p>Detecta cada tipo automáticamente, aunque vengan juntos en una misma planilla. Si subes varias 078 (ej. Maule y Valdivia por separado) en una misma tanda, se suman.</p>
     <button class="bigbtn" onclick="document.getElementById('fileInput').click()">Elegir archivos…</button>
     <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls" multiple style="display:none" onchange="handleFiles(this.files); this.value='';">
@@ -291,6 +291,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
           <span class="dchip miss" id="chipStk" onclick="openUpload()">🧱 073: sin datos</span>
           <span class="dchip miss" id="chipCie" onclick="openUpload()">⚓ Saldo W: sin datos</span>
           <span class="dchip miss" id="chip050" onclick="openUpload()">📌 050: sin datos</span>
+          <span class="dchip miss" id="chip0782" onclick="openUpload()">⏮ 0782: sin datos</span>
         </div>
         <button class="btn verde" onclick="openUpload()" style="width:100%;margin-top:10px">⬆ Gestionar archivos</button>
       </div>
@@ -449,6 +450,9 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <div class="secttl">🛬 UT llegando mañana a los destinos (OT)</div>
     <p class="note" id="llegNote"></p>
     <div class="tblbox"><div id="tblLleg"></div></div>
+    <div class="secttl">⏮ Despachado días anteriores (0782) → embarques pendientes</div>
+    <p class="note" id="nota0782">Archivo <b>0782</b> (mismo formato que la 078, el nombre debe incluir "0782"): despachos de días anteriores hacia 1890, 1826, 1803 Cerrillos, 1807 Bod. Nacional, 1808 La Divisa, 1829 DYC THNO y 1861 Internacional, más los despachos a clientes <b>Edipac / MM Packaging</b> solo con guía de salida. Cada pedido se cruza con los embarques <b>Pendientes</b> de la hoja Datos para traer su nave y corte documental. Agrupado por día → consolidador → nave.</p>
+    <div class="tblbox"><div id="tbl0782"></div></div>
     <div class="secttl">Programa del día vs despachado — <span id="plName2"></span></div>
     <p class="note" id="planNote"></p>
     <div class="ctrl"><div class="filters">
@@ -998,7 +1002,7 @@ const REMMAP = {'DYC SAI':['D&C SAI','D&C SAI'], 'PC VALP':['D&C VALPARAÍSO','P
 const CENTRO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL','1807':'BODEGA NACIONAL / DYC LOG.'};
 const PAISES_TI = ['UY','AR','BO','PY'];
 const CLIENTES_DIRECTOS = [['EDIPAC','Edipac'], ['MM PACKAGING','MM Packaging'], ['MARINETTI','Marinetti']];
-let DET = null, SAP = null, TRANS = null, STK = null, CIE = null, E050 = null;
+let DET = null, SAP = null, TRANS = null, STK = null, CIE = null, E050 = null, E0782 = null;
 const CONS_050 = {'1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL'};
 let MAIN = 'carga', TAB = 'G', PLANTA = 'Maule', STKC = '';
 let CHECKS = lsGet('cruceChecks', {});
@@ -1036,6 +1040,8 @@ async function handleFiles(files){
         const heads = aoa[0].map(norm);
         if (heads.includes('pedido sap') && heads.includes('nave') && heads.includes('consolidador')){
           ingestDetalle(aoa, f.name); encontrados.push('detalle');
+        } else if (heads.includes('lote') && heads.includes('cmv') && heads.includes('cantidad') && /0782/.test(f.name)){
+          ingest0782(aoa, f.name); encontrados.push('0782 (despachos días anteriores)');
         } else if (heads.includes('lote') && heads.includes('cmv') && heads.includes('cantidad')){
           ingest078(aoa, f.name, sapNuevoEnTanda); sapNuevoEnTanda = false; encontrados.push('078');
         } else if (heads.includes('ot') && heads.includes('zona') && heads.includes('nombre_origen')){
@@ -1669,10 +1675,10 @@ function siamesData(){
   });
   return Object.values(map).sort((a, b) => (b.ma + b.va) - (a.ma + a.va));
 }
-function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE, e050: E050}); }
+function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE, e050: E050, e0782: E0782}); }
 function restoreData(){
   const d = lsGet('cruceData3', null);
-  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null; E050 = d.e050 || null;
+  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null; E050 = d.e050 || null; E0782 = d.e0782 || null;
     // Formato antiguo de cierres (sin lotes por centro): descartar para que se resuba el Saldo W
     if (CIE && CIE.detalle && CIE.detalle.length && !CIE.detalle[0].centro) CIE = null;
     if (STK) STKC = Object.keys(STK.centros)[0] || ''; }
@@ -1797,6 +1803,14 @@ function refreshChips(){
   const c6 = $('chipCie');
   if (CIE){ c6.className = 'dchip ok'; c6.innerHTML = `⚓ Saldo W <b>&nbsp;${fdate(CIE.fecha)}</b>`; }
   else { c6.className = 'dchip miss'; c6.textContent = '⚓ Saldo W: sin datos'; }
+  const c7 = $('chip0782');
+  if (c7){
+    if (E0782 && E0782.rows.length){
+      const nd = new Set(E0782.rows.map(r => r.f)).size;
+      c7.className = 'dchip ok';
+      c7.innerHTML = `⏮ 0782 · ${nd} ${nd === 1 ? 'día' : 'días'} · ${E0782.rows.length} desp.`;
+    } else { c7.className = 'dchip miss'; c7.textContent = '⏮ 0782: sin datos'; }
+  }
   $('subline').textContent = DET
     ? 'Aquí tienes el estado actual de tu operación logística.'
     : 'Sube tus archivos para armar el cruce automático.';
@@ -1821,7 +1835,7 @@ function refreshChips(){
 
 function refreshAll(){
   refreshChips();
-  const has = !!(DET || SAP || TRANS || STK || CIE || E050);
+  const has = !!(DET || SAP || TRANS || STK || CIE || E050 || E0782);
   $('upzone').style.display = (DET && SAP && TRANS) ? 'none' : '';
   $('mainTabs').style.display = has ? '' : 'none';
   if (DET) kpis();
@@ -1977,6 +1991,123 @@ function prio050Modal(cons, nave, sem){
   aoa.push(['Total', '', '', '', r3(tm), r3(tv), r3(tm + tv)]);
   if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte (columna A del 050) se guarda desde ahora: vuelve a subir el 050 de hoy para verlo.</p>' + h;
   openModal(`📌 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar (050)</span>`, h, xlsDef('Nave 050 ' + nave + ' ' + cons, aoa));
+}
+// ================== 0782: DESPACHADO POR PLANTA DIAS ANTERIORES ==================
+// Misma estructura que la 078; destino = SEGUNDA columna 'Centro' (centro 2). Se toman los despachos a
+// 1890/1826/1803/1807/1808/1829/1861 y los a clientes Edipac / MM Packaging SOLO con guia de salida.
+const CONS_0782 = {'1890':'DYC SAI','1826':'Puerto Coronel','1803':'Cerrillos','1807':'Bodega Nacional','1808':'La Divisa','1829':'DYC THNO','1861':'Internacional'};
+function ingest0782(aoa, fname){
+  const heads = aoa[0].map(norm);
+  const ix = {};
+  heads.forEach((h, i) => { if (!(h in ix)) ix[h] = i; });
+  const col = (n, fb) => ix[n] !== undefined ? ix[n] : fb;
+  let c2i = -1, vistos = 0;
+  heads.forEach((h, i) => { if (h === 'centro'){ vistos++; if (vistos === 2 && c2i < 0) c2i = i; } });
+  if (c2i < 0) c2i = 40;
+  const C = {fe: col('fe.contab.', 1), ce: col('ce.', 3), ped: col('ped.clte.', 12), cant: col('cantidad', 14), sol: col('solicitante', 30), guia: col('guia despacho salida', 33)};
+  const rows = [];
+  for (let r = 1; r < aoa.length; r++){
+    const a = aoa[r]; if (!a) continue;
+    const cant = numv(a[C.cant]);
+    if (cant <= 0) continue;
+    const ce = String(a[C.ce] || '').trim();
+    if (ce !== '1801' && ce !== '1802') continue;
+    const c2 = String(a[c2i] == null ? '' : a[c2i]).trim().replace(/\.0$/, '');
+    const sol = String(a[C.sol] || '').trim();
+    const guia = String(a[C.guia] == null ? '' : a[C.guia]).trim();
+    let cons = CONS_0782[c2] || '';
+    if (!cons && /EDIPAC|MM PACKAGING/i.test(sol) && guia && guia !== '0') cons = /EDIPAC/i.test(sol) ? 'Cliente Edipac' : 'Cliente MM Packaging';
+    if (!cons) continue;
+    const f = dstr(a[C.fe]);
+    if (!f) continue;
+    rows.push({f, pl: ce === '1801' ? 'Maule' : 'Valdivia', cons, ped: String(a[C.ped] || '').trim().toUpperCase(), t: r3(cant)});
+  }
+  E0782 = {file: fname, rows};
+}
+function data0782(){
+  if (!E0782 || !E0782.rows.length) return null;
+  // pedido pendiente (Datos) -> nave y corte documental (el corte mas cercano si hay varios)
+  const pedMap = {};
+  ((DET && DET.riesgo) || []).forEach(x => {
+    const cur = pedMap[x.ped];
+    if (!cur || (x.fcd && (!cur.fcd || x.fcd < cur.fcd))) pedMap[x.ped] = {nave: x.nave, fcd: x.fcd};
+  });
+  const dias = {};
+  E0782.rows.forEach(r => {
+    const pd = pedMap[r.ped];
+    const nave = pd ? (pd.nave || '—') : 'Sin embarque pendiente';
+    const fcd = pd ? (pd.fcd || '') : '';
+    const d = dias[r.f] || (dias[r.f] = {});
+    const c = d[r.cons] || (d[r.cons] = {});
+    const nk = nave + '||' + fcd;
+    const n = c[nk] || (c[nk] = {nave, fcd, t: 0, peds: []});
+    n.t = r3(n.t + r.t);
+    if (r.ped && !n.peds.includes(r.ped)) n.peds.push(r.ped);
+  });
+  return dias;
+}
+const D0782_CERR = new Set();
+const C0782_CERR = new Set();
+function t0782DiaToggle(k){ if (D0782_CERR.has(k)) D0782_CERR.delete(k); else D0782_CERR.add(k); render0782(); }
+function t0782ConsToggle(k){ if (C0782_CERR.has(k)) C0782_CERR.delete(k); else C0782_CERR.add(k); render0782(); }
+function render0782(){
+  const el = $('tbl0782'), nEl = $('nota0782');
+  if (!el) return;
+  if (!E0782 || !E0782.rows.length){
+    nEl.textContent = '';
+    el.innerHTML = '<div class="empty">Sube el archivo <b>0782</b> (despachado por planta de días anteriores; el nombre del archivo debe incluir "0782").<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+    return;
+  }
+  const dias = data0782();
+  const hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+  const fechas = Object.keys(dias).sort().reverse();
+  nEl.innerHTML = `Archivo <b>${esc(E0782.file)}</b> · ${E0782.rows.length} despachos a consolidadores/clientes en ${fechas.length} ${fechas.length === 1 ? 'día' : 'días'} · UT = ton ÷ ${CFG.tDesp}` + (!DET || !DET.riesgo ? ' · <b>sube el detalle del día para cruzar naves y cortes</b>' : '');
+  const pillCorte = fcd => {
+    if (!fcd) return '—';
+    const dd = Math.round((isoToDate(fcd) - hoy0) / 86400000);
+    const pc = dd < 0 ? 'pill bad' : (dd === 0 ? 'pill warn' : (dd <= 2 ? 'pill soon' : 'pill ok'));
+    return `<span class="${pc} mono"><b>${fdate(fcd)}</b></span>`;
+  };
+  const pedsCell = peds => {
+    const vis = peds.slice(0, 6).map(esc).join(', ');
+    return `<span class="mono" style="font-size:11.5px" title="${esc(peds.join(', '))}">${vis}${peds.length > 6 ? ' <span class="cli">+' + (peds.length - 6) + ' más</span>' : ''}</span>`;
+  };
+  let h = '<table><thead><tr><th>Día despacho / Consolidador / Nave</th><th>Corte doc.</th><th>Pedidos</th><th class="num">UT desp.</th><th class="num">Ton</th></tr></thead><tbody>';
+  let tT = 0, tP = 0;
+  fechas.forEach(f => {
+    const conss = Object.keys(dias[f]).sort();
+    let dT = 0, dP = 0;
+    conss.forEach(cn => Object.values(dias[f][cn]).forEach(n => { dT = r3(dT + n.t); dP += n.peds.length; }));
+    tT = r3(tT + dT); tP += dP;
+    const dAb = !D0782_CERR.has(f);
+    h += `<tr class="grp ${dAb ? '' : 'closed'}" onclick="t0782DiaToggle('${f}')"><td colspan="3"><span class="caret">▾</span>📅 <b>${fdate(f)}</b> <span class="cnt">· ${conss.length} consolidadores · ${dP} pedidos</span></td><td class="num"><b>${fmtU(dT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(dT)}</b></td></tr>`;
+    if (!dAb) return;
+    conss.forEach(cn => {
+      const naves = Object.values(dias[f][cn]).sort((a, b) => (a.fcd || '9999').localeCompare(b.fcd || '9999'));
+      let cT = 0, cP = 0;
+      naves.forEach(n => { cT = r3(cT + n.t); cP += n.peds.length; });
+      const ck = f + '||' + cn;
+      const cAb = !C0782_CERR.has(ck);
+      h += `<tr class="grp ${cAb ? '' : 'closed'}" onclick="t0782ConsToggle(this.dataset.ck)" data-ck="${esc(ck)}"><td colspan="3" style="padding-left:24px"><span class="caret">▾</span>⚓ <b>${esc(cn)}</b> <span class="cnt">· ${naves.length} ${naves.length === 1 ? 'nave' : 'naves'} · ${cP} pedidos</span></td><td class="num"><b>${fmtU(cT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(cT)}</b></td></tr>`;
+      if (!cAb) return;
+      naves.forEach(n => {
+        h += `<tr class="det"><td style="padding-left:48px">🚢 <b>${esc(n.nave)}</b></td><td>${pillCorte(n.fcd)}</td><td>${pedsCell(n.peds)}</td><td class="num">${fmtU(n.t / CFG.tDesp)}</td><td class="num">${fmt(n.t)}</td></tr>`;
+      });
+    });
+  });
+  h += `<tr class="tot"><td colspan="2">Total</td><td class="num">${tP} pedidos</td><td class="num">${fmtU(tT / CFG.tDesp)}</td><td class="num">${fmt(tT)}</td></tr></tbody></table>`;
+  el.innerHTML = h;
+}
+function aoa0782(){
+  const aoa = [['Dia despacho','Consolidador','Nave','Corte doc','Pedidos','UT desp','Ton']];
+  const dias = data0782();
+  if (!dias) return aoa;
+  Object.keys(dias).sort().reverse().forEach(f => {
+    Object.keys(dias[f]).sort().forEach(cn => {
+      Object.values(dias[f][cn]).forEach(n => aoa.push([f, cn, n.nave, n.fcd, n.peds.join(', '), r3(n.t / CFG.tDesp), r3(n.t)]));
+    });
+  });
+  return aoa;
 }
 // ================== CARGAS EN RIESGO (cruce Datos + 050 por pedido/posicion) ==================
 const RIESGO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1803':'Cerrillos','1807':'Bodega Nacional','1808':'La Divisa','1822':'1822','1826':'Puerto Coronel','1828':'1828','1829':'DYC THNO','1861':'Internacional','1890':'DYC SAI','1893':'PC Valp'};
@@ -3612,6 +3743,7 @@ function renderPlan(){
   renderDem();
   renderTrans();
   renderLlegadas();
+  render0782();
 }
 // Cuadro: UT con llegada programada a destino al dia siguiente (FH_LLE_DES_PROG de la OT)
 function renderLlegadas(){
@@ -3924,6 +4056,10 @@ function buildExport(){
     });
     out['Planificacion'] = rows;
   }
+  if (E0782 && E0782.rows.length){
+    const a82 = aoa0782();
+    if (a82.length > 1) out['Despachos 0782'] = a82;
+  }
   return out;
 }
 async function saveFile(name, data){
@@ -3983,7 +4119,7 @@ const HOJAS_TAB = {
   stock: n => ['Stock 073','Stock por año','Carga antigua','Semielaborado SEMI','Stock P09'].includes(n) || n.startsWith('Antiguedad'),
   sim: n => ['Simulador','Historico 073'].includes(n),
   cie: n => ['Cierres resumen','Cierres detalle','Saldos por centro'].includes(n),
-  plan: n => ['Planificacion','Transporte','Despachos 078','Demanda'].includes(n)
+  plan: n => ['Planificacion','Transporte','Despachos 078','Demanda','Despachos 0782'].includes(n)
 };
 async function exportExcel(todo){
   const secs = buildExport();
