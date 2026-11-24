@@ -1042,10 +1042,18 @@ async function handleFiles(files){
         const aoa = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
         if (!aoa.length || !aoa[0]) continue;
         const heads = aoa[0].map(norm);
-        if (heads.includes('pedido sap') && heads.includes('nave') && heads.includes('consolidador')){
+        const es0782 = /0782/.test(String(name)) || (/0782/.test(f.name) && heads.includes('cantidad'));
+        if (es0782){
+          // la hoja se llama 0782: va directo a despachos de dias anteriores; si el encabezado no esta en la fila 1, se busca
+          let hi0 = 0;
+          for (let hr = 0; hr < Math.min(aoa.length, 6); hr++){
+            const hs = (aoa[hr] || []).map(norm);
+            if (hs.includes('cantidad') && (hs.includes('lote') || hs.includes('cmv') || hs.includes('fe.contab.'))){ hi0 = hr; break; }
+          }
+          const n82 = ingest0782(hi0 > 0 ? aoa.slice(hi0) : aoa, f.name);
+          encontrados.push(n82 > 0 ? `0782: ${n82} despachos a consolidadores/clientes guardados en el historial` : '0782 reconocido pero con 0 despachos útiles (revisa Fe.contab., Ce. 1801/1802, Cantidad y el 2° Centro destino)');
+        } else if (heads.includes('pedido sap') && heads.includes('nave') && heads.includes('consolidador')){
           ingestDetalle(aoa, f.name); encontrados.push('detalle');
-        } else if (heads.includes('lote') && heads.includes('cmv') && heads.includes('cantidad') && (/0782/.test(String(name)) || /0782/.test(f.name))){
-          ingest0782(aoa, f.name); encontrados.push('0782 (despachos días anteriores)');
         } else if (heads.includes('lote') && heads.includes('cmv') && heads.includes('cantidad')){
           ingest078(aoa, f.name, sapNuevoEnTanda); sapNuevoEnTanda = false; encontrados.push('078');
         } else if (heads.includes('ot') && heads.includes('zona') && heads.includes('nombre_origen')){
@@ -1065,7 +1073,7 @@ async function handleFiles(files){
       }
       if (cieAoa && baseAoa){ ingestCierres(cieAoa, cieHdr, baseAoa, f.name); encontrados.push('cierres de nave + base'); }
       else if (cieAoa || baseAoa) encontrados.push('Saldo W incompleto (se necesitan cierres Y base juntas)');
-      msgs.push(encontrados.length ? `✅ ${f.name}: ${encontrados.join(' + ')}` : `⚠️ ${f.name}: no reconocido (se espera formato Datos, 078, OT-GDE, 073 o Saldo W)`);
+      msgs.push(encontrados.length ? `✅ ${f.name}: ${encontrados.join(' + ')}` : `⚠️ ${f.name}: no reconocido — hojas: [${wb.SheetNames.join(', ')}] (se espera Datos, 078, 0782, OT-GDE, 073, Saldo W o 050)`);
     } catch(err){
       msgs.push(`❌ ${f.name}: error al leer (${err.message})`);
     }
@@ -2050,6 +2058,7 @@ function ingest0782(aoa, fname){
   HIST0782.file = fname;
   lsSet('cruceHist0782', HIST0782);
   hist0782Resolve();
+  return rows.length;
 }
 // Congela el cruce pedido -> nave/corte con los pendientes de Datos (solo completa lo no resuelto)
 function hist0782Resolve(){
