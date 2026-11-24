@@ -1002,11 +1002,15 @@ const REMMAP = {'DYC SAI':['D&C SAI','D&C SAI'], 'PC VALP':['D&C VALPARAÍSO','P
 const CENTRO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL','1807':'BODEGA NACIONAL / DYC LOG.'};
 const PAISES_TI = ['UY','AR','BO','PY'];
 const CLIENTES_DIRECTOS = [['EDIPAC','Edipac'], ['MM PACKAGING','MM Packaging'], ['MARINETTI','Marinetti']];
-let DET = null, SAP = null, TRANS = null, STK = null, CIE = null, E050 = null, E0782 = null;
+let DET = null, SAP = null, TRANS = null, STK = null, CIE = null, E050 = null;
 const CONS_050 = {'1890':'DYC SAI','1893':'PC VALP','1826':'PUERTO CORONEL'};
 let MAIN = 'carga', TAB = 'G', PLANTA = 'Maule', STKC = '';
 let CHECKS = lsGet('cruceChecks', {});
 let HIST = lsGet('cruceHist073', {});   // {fechaISO: {centros:{code:nombre}, g:{code:{total,mar,int,chdir,chbod,semi,p09}}}}
+// Historial de despachos 0782: {dias: {fechaISO: {items: {cons: {ped: ton}}, res: {ped: [nave,fcd] | 0}}}, file}
+// res = cruce con los pendientes de Datos CONGELADO al momento de la carga (0 = revisado y sin embarque pendiente)
+let HIST0782 = lsGet('cruceHist0782', {dias: {}});
+if (!HIST0782 || !HIST0782.dias) HIST0782 = {dias: {}};
 let SIM = Object.assign({centro:'', iniOv:{}, dias:{}}, lsGet('cruceSim', {}));  // dias: {centro: {fechaISO: {ut, prod}}}
 let CFG = Object.assign({tPlan:28, tDesp:27}, lsGet('cruceCfg', {}));
 let PLAN = lsGet('crucePlan3', {progO:{Maule:{},Valdivia:{}}, man:{Maule:{},Valdivia:{}}});
@@ -1067,6 +1071,7 @@ async function handleFiles(files){
     }
   }
   $('upstatus').innerHTML = msgs.map(esc).join('<br>');
+  hist0782Resolve();
   persistData();
   refreshAll();
   toast(msgs.join(' · '));
@@ -1675,10 +1680,20 @@ function siamesData(){
   });
   return Object.values(map).sort((a, b) => (b.ma + b.va) - (a.ma + a.va));
 }
-function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE, e050: E050, e0782: E0782}); }
+function persistData(){ lsSet('cruceData3', {det: DET, sap: SAP, trans: TRANS, stk: STK, cie: CIE, e050: E050}); }
 function restoreData(){
   const d = lsGet('cruceData3', null);
-  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null; E050 = d.e050 || null; E0782 = d.e0782 || null;
+  if (d){ DET = d.det || null; SAP = d.sap || null; TRANS = d.trans || null; STK = d.stk || null; CIE = d.cie || null; E050 = d.e050 || null;
+    // migracion: 0782 guardado con el formato antiguo (una sola carga) -> historial por dias
+    if (d.e0782 && d.e0782.rows && d.e0782.rows.length && !Object.keys(HIST0782.dias).length){
+      d.e0782.rows.forEach(r => {
+        const dd = HIST0782.dias[r.f] || (HIST0782.dias[r.f] = {items: {}, res: {}});
+        const m = dd.items[r.cons] || (dd.items[r.cons] = {});
+        m[r.ped] = r3((m[r.ped] || 0) + r.t);
+      });
+      HIST0782.file = d.e0782.file || '';
+      lsSet('cruceHist0782', HIST0782);
+    }
     // Formato antiguo de cierres (sin lotes por centro): descartar para que se resuba el Saldo W
     if (CIE && CIE.detalle && CIE.detalle.length && !CIE.detalle[0].centro) CIE = null;
     if (STK) STKC = Object.keys(STK.centros)[0] || ''; }
@@ -1805,10 +1820,10 @@ function refreshChips(){
   else { c6.className = 'dchip miss'; c6.textContent = '⚓ Saldo W: sin datos'; }
   const c7 = $('chip0782');
   if (c7){
-    if (E0782 && E0782.rows.length){
-      const nd = new Set(E0782.rows.map(r => r.f)).size;
+    const nd782 = Object.keys(HIST0782.dias).length;
+    if (nd782){
       c7.className = 'dchip ok';
-      c7.innerHTML = `⏮ 0782 · ${nd} ${nd === 1 ? 'día' : 'días'} · ${E0782.rows.length} desp.`;
+      c7.innerHTML = `⏮ 0782 · historial <b>&nbsp;${nd782} ${nd782 === 1 ? 'día' : 'días'}</b>`;
     } else { c7.className = 'dchip miss'; c7.textContent = '⏮ 0782: sin datos'; }
   }
   $('subline').textContent = DET
@@ -1835,7 +1850,7 @@ function refreshChips(){
 
 function refreshAll(){
   refreshChips();
-  const has = !!(DET || SAP || TRANS || STK || CIE || E050 || E0782);
+  const has = !!(DET || SAP || TRANS || STK || CIE || E050 || Object.keys(HIST0782.dias).length);
   $('upzone').style.display = (DET && SAP && TRANS) ? 'none' : '';
   $('mainTabs').style.display = has ? '' : 'none';
   if (DET) kpis();
@@ -2020,48 +2035,97 @@ function ingest0782(aoa, fname){
     if (!cons) continue;
     const f = dstr(a[C.fe]);
     if (!f) continue;
-    rows.push({f, pl: ce === '1801' ? 'Maule' : 'Valdivia', cons, ped: String(a[C.ped] || '').trim().toUpperCase(), t: r3(cant)});
+    rows.push({f, cons, ped: String(a[C.ped] || '').trim().toUpperCase(), t: r3(cant)});
   }
-  E0782 = {file: fname, rows};
+  // HISTORIAL por dias: los dias que trae el archivo REEMPLAZAN su dia en el historial; el resto se conserva
+  const porDia = {};
+  rows.forEach(r => {
+    const dd = porDia[r.f] || (porDia[r.f] = {});
+    const m = dd[r.cons] || (dd[r.cons] = {});
+    m[r.ped] = r3((m[r.ped] || 0) + r.t);
+  });
+  Object.keys(porDia).forEach(f => {
+    HIST0782.dias[f] = {items: porDia[f], res: (HIST0782.dias[f] && HIST0782.dias[f].res) || {}};
+  });
+  HIST0782.file = fname;
+  lsSet('cruceHist0782', HIST0782);
+  hist0782Resolve();
+}
+// Congela el cruce pedido -> nave/corte con los pendientes de Datos (solo completa lo no resuelto)
+function hist0782Resolve(){
+  if (!DET || !DET.riesgo) return;
+  const pedMap = {};
+  DET.riesgo.forEach(x => {
+    const cur = pedMap[x.ped];
+    if (!cur || (x.fcd && (!cur.c || x.fcd < cur.c))) pedMap[x.ped] = {n: x.nave, c: x.fcd};
+  });
+  let chg = false;
+  Object.values(HIST0782.dias).forEach(d => {
+    if (!d.res) d.res = {};
+    Object.values(d.items || {}).forEach(m => Object.keys(m).forEach(ped => {
+      if (d.res[ped] !== undefined) return;
+      const pd = pedMap[ped];
+      d.res[ped] = pd ? [pd.n || '', pd.c || ''] : 0;
+      chg = true;
+    }));
+  });
+  if (chg) lsSet('cruceHist0782', HIST0782);
 }
 function data0782(){
-  if (!E0782 || !E0782.rows.length) return null;
-  // pedido pendiente (Datos) -> nave y corte documental (el corte mas cercano si hay varios)
-  const pedMap = {};
-  ((DET && DET.riesgo) || []).forEach(x => {
-    const cur = pedMap[x.ped];
-    if (!cur || (x.fcd && (!cur.fcd || x.fcd < cur.fcd))) pedMap[x.ped] = {nave: x.nave, fcd: x.fcd};
-  });
+  const fechas = Object.keys(HIST0782.dias);
+  if (!fechas.length) return null;
   const dias = {};
-  E0782.rows.forEach(r => {
-    const pd = pedMap[r.ped];
-    const nave = pd ? (pd.nave || '—') : 'Sin embarque pendiente';
-    const fcd = pd ? (pd.fcd || '') : '';
-    const d = dias[r.f] || (dias[r.f] = {});
-    const c = d[r.cons] || (d[r.cons] = {});
-    const nk = nave + '||' + fcd;
-    const n = c[nk] || (c[nk] = {nave, fcd, t: 0, peds: []});
-    n.t = r3(n.t + r.t);
-    if (r.ped && !n.peds.includes(r.ped)) n.peds.push(r.ped);
+  fechas.forEach(f => {
+    const d = HIST0782.dias[f];
+    const out = dias[f] = {};
+    Object.keys(d.items || {}).forEach(cons => {
+      const c = out[cons] = {};
+      Object.keys(d.items[cons]).forEach(ped => {
+        const t = d.items[cons][ped];
+        const r = (d.res || {})[ped];
+        let nave, fcd;
+        if (r === undefined){ nave = 'Sin cruce aún (sube el detalle)'; fcd = ''; }
+        else if (r === 0){ nave = 'Sin embarque pendiente'; fcd = ''; }
+        else { nave = r[0] || '—'; fcd = r[1] || ''; }
+        const nk = nave + '||' + fcd;
+        const n = c[nk] || (c[nk] = {nave, fcd, t: 0, peds: []});
+        n.t = r3(n.t + t);
+        if (!n.peds.includes(ped)) n.peds.push(ped);
+      });
+    });
   });
   return dias;
 }
+const M0782_CERR = new Set();
+let M0782_INIT = false;
 const D0782_CERR = new Set();
 const C0782_CERR = new Set();
+function t0782MesToggle(k){ if (M0782_CERR.has(k)) M0782_CERR.delete(k); else M0782_CERR.add(k); render0782(); }
 function t0782DiaToggle(k){ if (D0782_CERR.has(k)) D0782_CERR.delete(k); else D0782_CERR.add(k); render0782(); }
 function t0782ConsToggle(k){ if (C0782_CERR.has(k)) C0782_CERR.delete(k); else C0782_CERR.add(k); render0782(); }
+function borrar0782(){
+  if (!confirm('¿Borrar TODO el historial de despachos 0782 guardado en este navegador?')) return;
+  HIST0782 = {dias: {}};
+  lsSet('cruceHist0782', HIST0782);
+  M0782_INIT = false;
+  render0782();
+  refreshChips();
+}
 function render0782(){
   const el = $('tbl0782'), nEl = $('nota0782');
   if (!el) return;
-  if (!E0782 || !E0782.rows.length){
-    nEl.textContent = '';
-    el.innerHTML = '<div class="empty">Sube el archivo <b>0782</b> (despachado por planta de días anteriores; el nombre del archivo debe incluir "0782").<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+  const dias = data0782();
+  if (!dias){
+    nEl.innerHTML = 'Archivo <b>0782</b> (mismo formato que la 078, el nombre debe incluir "0782"): despachos a 1890, 1826, 1803, 1807, 1808, 1829 y 1861, más clientes Edipac / MM Packaging con guía de salida. <b>Cada día subido queda guardado en un historial</b> (resubir un día lo reemplaza) y se agrupa por mes cuando crece.';
+    el.innerHTML = '<div class="empty">Sube el archivo <b>0782</b> para empezar el historial de despachos.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
     return;
   }
-  const dias = data0782();
   const hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
   const fechas = Object.keys(dias).sort().reverse();
-  nEl.innerHTML = `Archivo <b>${esc(E0782.file)}</b> · ${E0782.rows.length} despachos a consolidadores/clientes en ${fechas.length} ${fechas.length === 1 ? 'día' : 'días'} · UT = ton ÷ ${CFG.tDesp}` + (!DET || !DET.riesgo ? ' · <b>sube el detalle del día para cruzar naves y cortes</b>' : '');
+  const sinCruce = Object.values(HIST0782.dias).some(d => Object.values(d.items || {}).some(m => Object.keys(m).some(p => (d.res || {})[p] === undefined)));
+  nEl.innerHTML = `Historial: <b>${fechas.length} ${fechas.length === 1 ? 'día' : 'días'}</b> guardados en este navegador (última carga: ${esc(HIST0782.file || '—')}) · al resubir un día se reemplaza ese día · UT = ton ÷ ${CFG.tDesp} · el cruce nave/corte queda congelado al momento de la carga` +
+    (sinCruce ? ' · <b>hay despachos sin cruzar: sube el detalle del día</b>' : '') +
+    ` <button class="btn mini" onclick="borrar0782()" title="Elimina todo el historial 0782 de este navegador">🗑 Borrar historial</button>`;
   const pillCorte = fcd => {
     if (!fcd) return '—';
     const dd = Math.round((isoToDate(fcd) - hoy0) / 86400000);
@@ -2072,30 +2136,50 @@ function render0782(){
     const vis = peds.slice(0, 6).map(esc).join(', ');
     return `<span class="mono" style="font-size:11.5px" title="${esc(peds.join(', '))}">${vis}${peds.length > 6 ? ' <span class="cli">+' + (peds.length - 6) + ' más</span>' : ''}</span>`;
   };
-  let h = '<table><thead><tr><th>Día despacho / Consolidador / Nave</th><th>Corte doc.</th><th>Pedidos</th><th class="num">UT desp.</th><th class="num">Ton</th></tr></thead><tbody>';
-  let tT = 0, tP = 0;
+  let h = '<table><thead><tr><th>Mes / Día / Consolidador / Nave</th><th>Corte doc.</th><th>Pedidos</th><th class="num">UT desp.</th><th class="num">Ton</th></tr></thead><tbody>';
+  // nivel MES (los meses antiguos parten cerrados)
+  const meses = [];
   fechas.forEach(f => {
-    const conss = Object.keys(dias[f]).sort();
+    const mk = f.slice(0, 7);
+    let m = meses.find(x => x.k === mk);
+    if (!m){ m = {k: mk, fechas: []}; meses.push(m); }
+    m.fechas.push(f);
+  });
+  if (!M0782_INIT){ meses.slice(1).forEach(m => M0782_CERR.add(m.k)); M0782_INIT = true; }
+  const subDia = f => {
     let dT = 0, dP = 0;
-    conss.forEach(cn => Object.values(dias[f][cn]).forEach(n => { dT = r3(dT + n.t); dP += n.peds.length; }));
-    tT = r3(tT + dT); tP += dP;
-    const dAb = !D0782_CERR.has(f);
-    h += `<tr class="grp ${dAb ? '' : 'closed'}" onclick="t0782DiaToggle('${f}')"><td colspan="3"><span class="caret">▾</span>📅 <b>${fdate(f)}</b> <span class="cnt">· ${conss.length} consolidadores · ${dP} pedidos</span></td><td class="num"><b>${fmtU(dT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(dT)}</b></td></tr>`;
-    if (!dAb) return;
-    conss.forEach(cn => {
-      const naves = Object.values(dias[f][cn]).sort((a, b) => (a.fcd || '9999').localeCompare(b.fcd || '9999'));
-      let cT = 0, cP = 0;
-      naves.forEach(n => { cT = r3(cT + n.t); cP += n.peds.length; });
-      const ck = f + '||' + cn;
-      const cAb = !C0782_CERR.has(ck);
-      h += `<tr class="grp ${cAb ? '' : 'closed'}" onclick="t0782ConsToggle(this.dataset.ck)" data-ck="${esc(ck)}"><td colspan="3" style="padding-left:24px"><span class="caret">▾</span>⚓ <b>${esc(cn)}</b> <span class="cnt">· ${naves.length} ${naves.length === 1 ? 'nave' : 'naves'} · ${cP} pedidos</span></td><td class="num"><b>${fmtU(cT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(cT)}</b></td></tr>`;
-      if (!cAb) return;
-      naves.forEach(n => {
-        h += `<tr class="det"><td style="padding-left:48px">🚢 <b>${esc(n.nave)}</b></td><td>${pillCorte(n.fcd)}</td><td>${pedsCell(n.peds)}</td><td class="num">${fmtU(n.t / CFG.tDesp)}</td><td class="num">${fmt(n.t)}</td></tr>`;
+    Object.keys(dias[f]).forEach(cn => Object.values(dias[f][cn]).forEach(n => { dT = r3(dT + n.t); dP += n.peds.length; }));
+    return {dT, dP};
+  };
+  let tT = 0, tP = 0;
+  meses.forEach(mo => {
+    let mT = 0, mP = 0;
+    mo.fechas.forEach(f => { const s = subDia(f); mT = r3(mT + s.dT); mP += s.dP; });
+    tT = r3(tT + mT); tP += mP;
+    const mAb = !M0782_CERR.has(mo.k);
+    h += `<tr class="grp ${mAb ? '' : 'closed'}" onclick="t0782MesToggle('${mo.k}')"><td colspan="3"><span class="caret">▾</span>🗓 <b>${(MES_NOM[+mo.k.slice(5, 7)] || mo.k)} ${mo.k.slice(0, 4)}</b> <span class="cnt">· ${mo.fechas.length} ${mo.fechas.length === 1 ? 'día' : 'días'} · ${mP} pedidos</span></td><td class="num"><b>${fmtU(mT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(mT)}</b></td></tr>`;
+    if (!mAb) return;
+    mo.fechas.forEach(f => {
+      const conss = Object.keys(dias[f]).sort();
+      const s = subDia(f);
+      const dAb = !D0782_CERR.has(f);
+      h += `<tr class="grp ${dAb ? '' : 'closed'}" onclick="t0782DiaToggle('${f}')" style="font-weight:600"><td colspan="3" style="padding-left:22px"><span class="caret">▾</span>📅 <b>${fdate(f)}</b> <span class="cnt">· ${conss.length} consolidadores · ${s.dP} pedidos</span></td><td class="num"><b>${fmtU(s.dT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(s.dT)}</b></td></tr>`;
+      if (!dAb) return;
+      conss.forEach(cn => {
+        const naves = Object.values(dias[f][cn]).sort((a, b) => (a.fcd || '9999').localeCompare(b.fcd || '9999'));
+        let cT = 0, cP = 0;
+        naves.forEach(n => { cT = r3(cT + n.t); cP += n.peds.length; });
+        const ck = f + '||' + cn;
+        const cAb = !C0782_CERR.has(ck);
+        h += `<tr class="grp ${cAb ? '' : 'closed'}" onclick="t0782ConsToggle(this.dataset.ck)" data-ck="${esc(ck)}"><td colspan="3" style="padding-left:44px"><span class="caret">▾</span>⚓ <b>${esc(cn)}</b> <span class="cnt">· ${naves.length} ${naves.length === 1 ? 'nave' : 'naves'} · ${cP} pedidos</span></td><td class="num"><b>${fmtU(cT / CFG.tDesp)}</b></td><td class="num"><b>${fmt(cT)}</b></td></tr>`;
+        if (!cAb) return;
+        naves.forEach(n => {
+          h += `<tr class="det"><td style="padding-left:66px">🚢 <b>${esc(n.nave)}</b></td><td>${pillCorte(n.fcd)}</td><td>${pedsCell(n.peds)}</td><td class="num">${fmtU(n.t / CFG.tDesp)}</td><td class="num">${fmt(n.t)}</td></tr>`;
+        });
       });
     });
   });
-  h += `<tr class="tot"><td colspan="2">Total</td><td class="num">${tP} pedidos</td><td class="num">${fmtU(tT / CFG.tDesp)}</td><td class="num">${fmt(tT)}</td></tr></tbody></table>`;
+  h += `<tr class="tot"><td colspan="2">Total historial</td><td class="num">${tP} pedidos</td><td class="num">${fmtU(tT / CFG.tDesp)}</td><td class="num">${fmt(tT)}</td></tr></tbody></table>`;
   el.innerHTML = h;
 }
 function aoa0782(){
@@ -4064,7 +4148,7 @@ function buildExport(){
     });
     out['Planificacion'] = rows;
   }
-  if (E0782 && E0782.rows.length){
+  if (Object.keys(HIST0782.dias).length){
     const a82 = aoa0782();
     if (a82.length > 1) out['Despachos 0782'] = a82;
   }
@@ -4146,7 +4230,7 @@ async function exportExcel(todo){
   saveFile('cruce' + suf + '_' + (DET ? DET.corte : dateToISO(new Date())) + '.xlsx', buf);
 }
 // Respaldo / restauracion de todos los datos del panel (para verlos en otra PC)
-const LS_KEYS = ['cruceData3','cruceHist073','cruceSim','crucePlan3','cruceChecks','cruceCfg','cruceUser'];
+const LS_KEYS = ['cruceData3','cruceHist073','cruceHist0782','cruceSim','crucePlan3','cruceChecks','cruceCfg','cruceUser'];
 function exportDatos(){
   const out = {panel: 'cruce-carga', fecha: dateToISO(new Date())};
   LS_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v) out[k] = JSON.parse(v); } catch(e){} });
