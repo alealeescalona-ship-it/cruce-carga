@@ -394,7 +394,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
 
   <!-- ============ TAB CARGAS EN RIESGO ============ -->
   <section id="sec_riesgo" style="display:none">
-    <p class="note">Cruce <b>Datos + 050</b> por pedido/posición (en el 050 vienen juntos, ej. OE00100/2). Embarques <b>marítimos · status SM Pendiente</b> con corte documental en la <b>semana pasada, la actual o la próxima</b> (martes a lunes), agrupados por <b>semana → consolidador solicitado → nave → transporte</b>. El faltante = <b>lo solicitado menos lo ya seguro</b>: lo que está en el consolidador solicitado (Centro Destino del 050) <b>más el 1821</b> — y como el 050 a veces no refleja el 1821, se usa en su lugar el <b>Tránsito a Stacking + Consolidado</b> de la hoja Datos si es mayor. Se mide en toneladas y unidades. <b>Cont. afectados</b> ≈ ton faltantes ÷ (ton solicitadas ÷ contenedores); si el faltante es chico (ej. 4 unidades) queda como <span class="pill warn">alerta</span> sin afectar contenedor. <b>Clic</b> abre semanas, consolidadores y naves · <b>doble clic en un transporte</b> = dónde está el stock.</p>
+    <p class="note">Cruce <b>Datos + 050</b> por pedido/posición (en el 050 vienen juntos, ej. OE00100/2). Embarques <b>marítimos · status SM Pendiente</b> con corte documental en la <b>semana pasada, la actual o la próxima</b> (martes a lunes), agrupados por <b>semana → consolidador solicitado → nave → transporte</b>. El faltante = <b>lo solicitado menos lo ya seguro</b>: lo que está en el consolidador solicitado (Centro Destino del 050) <b>más el 1821</b> — y como el 050 a veces no refleja el 1821, se usa en su lugar el <b>Tránsito a Stacking + Consolidado</b> de la hoja Datos si es mayor. Se mide en toneladas y unidades. <b>Si el corte documental ya pasó</b>, lo que quedó en el centro del consolidador <b>no alcanzó la nave</b>: solo cuenta como embarcado lo del 1821 / consolidado / tránsito, y el resto pasa a contenedores afectados. <b>Cont. afectados</b> ≈ ton faltantes ÷ (ton solicitadas ÷ contenedores); si el faltante es chico (ej. 4 unidades) queda como <span class="pill warn">alerta</span> sin afectar contenedor. <b>Clic</b> abre semanas, consolidadores y naves · <b>doble clic en un transporte</b> = dónde está el stock.</p>
     <div class="ctrl"><div class="filters">
       <select id="fRgoVer" onchange="renderRiesgo()">
         <option value="r">Solo embarques con riesgo</option>
@@ -2176,23 +2176,26 @@ function riesgoData(){
       if (c !== consSol && c !== '1821') fuera = r3(fuera + v);
     });
     // Seguro = lo en el consolidador solicitado (050) + el MAYOR entre el 1821 del 050 y
-    // el transito a stacking + consolidado TON de la hoja Datos (el 050 a veces no refleja el 1821)
+    // el transito a stacking + consolidado TON de la hoja Datos (el 050 a veces no refleja el 1821).
+    // Si el CORTE DOCUMENTAL YA PASÓ, lo que quedó en el centro del consolidador NO alcanzó la nave:
+    // solo cuenta como embarcado lo del 1821 / consolidado / transito a stacking.
+    const yaPaso = g.fcd < dateToISO(hoy0);
     const cesCons = consSol ? (ces[consSol] || 0) : 0;
     const ces1821 = ces['1821'] || 0;
-    const seguro = r3(cesCons + Math.max(ces1821, g.tc || 0));
+    const seguro = r3((yaPaso ? 0 : cesCons) + Math.max(ces1821, g.tc || 0));
     // unidades ya seguras (Stock Ce. del 050 + Consolidado UN de Datos; si el 050 guardado no las trae, queda null)
     let uCons = 0, u1821 = 0, uniOk = true;
     g.keys.forEach(k => (idx[k] || []).forEach(r => {
       if (r.ceu === undefined){ uniOk = false; return; }
       Object.keys(r.ceu).forEach(c => { if (c === consSol) uCons += r.ceu[c]; else if (c === '1821') u1821 += r.ceu[c]; });
     }));
-    const uniSeg = uCons + Math.max(u1821, g.cuD || 0);
+    const uniSeg = (yaPaso ? 0 : uCons) + Math.max(u1821, g.cuD || 0);
     itemsDet.forEach(it => {
       if (it.sin || !it.ice) return;
       let fu = 0;
       Object.keys(it.ice).forEach(c => { if (c !== consSol && c !== '1821') fu = r3(fu + it.ice[c]); });
       it.fuera = fu;
-      it.seg = r3((consSol ? (it.ice[consSol] || 0) : 0) + Math.max(it.ice['1821'] || 0, g.tcK[it.k] || 0));
+      it.seg = r3((yaPaso || !consSol ? 0 : (it.ice[consSol] || 0)) + Math.max(it.ice['1821'] || 0, g.tcK[it.k] || 0));
       it.fal = Math.max(0, r3(it.sol - it.seg));
     });
     // RIESGO = lo que FALTA por llegar al solicitado (solicitado - lo ya seguro)
@@ -2204,7 +2207,7 @@ function riesgoData(){
     const sw = semanaMartes(g.fcd);
     const semTag = sw.key < wkAct.key ? 'semana pasada' : (sw.key > wkAct.key ? 'próxima semana' : 'semana actual');
     return Object.assign(g, {uniSol: Math.round(uniSol), tonSol, consSol, consNom: consSol ? (RIESGO_NOM[consSol] || consSol) : 'Sin 050', sin050, ces,
-      seguro, fuera, uniSeg: uniOk ? Math.round(uniSeg) : null, fal, falU, tpc, contAf, con050: g.keys.length - sin050, itemsDet,
+      seguro, fuera, uniSeg: uniOk ? Math.round(uniSeg) : null, fal, falU, tpc, contAf, con050: g.keys.length - sin050, itemsDet, yaPaso,
       semKey: sw.key, semLbl: sw.lbl, semTag});
   });
   list.sort((a, b) => a.semKey.localeCompare(b.semKey) || a.consNom.localeCompare(b.consNom) || a.nave.localeCompare(b.nave) || a.fcd.localeCompare(b.fcd));
@@ -2316,7 +2319,9 @@ function riesgoModal(gk){
   if (!g) return;
   const nomC = c => RIESGO_NOM[c] || c;
   let h = `<div class="chsel" style="margin:10px 12px"><span>Solicitado 050: <b>${nf0.format(g.uniSol)} unid</b> · <b>${fmt(g.tonSol)} t</b></span><span>Contenedores: <b>${g.cont}</b>${g.tpc > 0 ? ' (~' + fmt(g.tpc) + ' t/cont)' : ''}</span><span>Consolidador solicitado: <b>${esc(nomC(g.consSol) || '—')}</b></span>` +
-    `<span>Ya seguro: <b>${fmt(g.seguro)} t${g.uniSeg !== null ? ' · ' + nf0.format(g.uniSeg) + ' unid' : ''}</b> <span class="cli" title="Se suma el consolidador solicitado + el mayor entre el 1821 del 050 y el tránsito a stacking + consolidado de la hoja Datos">(${esc(nomC(g.consSol) || 'consolidador')} ${fmt((g.ces || {})[g.consSol] || 0)} + máx[1821 ${fmt((g.ces || {})['1821'] || 0)} · tráns/consol. Datos ${fmt(g.tc || 0)}])</span></span>` +
+    (g.yaPaso
+      ? `<span>Alcanzó a salir: <b>${fmt(g.seguro)} t${g.uniSeg !== null ? ' · ' + nf0.format(g.uniSeg) + ' unid' : ''}</b> <span class="cli" title="El corte documental ya pasó: solo cuenta como embarcado lo del 1821 / consolidado / tránsito a stacking; lo que quedó en el centro del consolidador no alcanzó la nave">(máx[1821 ${fmt((g.ces || {})['1821'] || 0)} · tráns/consol. Datos ${fmt(g.tc || 0)}] — <b class="neg">quedaron ${fmt((g.ces || {})[g.consSol] || 0)} t en ${esc(nomC(g.consSol) || 'el consolidador')}</b>)</span></span>`
+      : `<span>Ya seguro: <b>${fmt(g.seguro)} t${g.uniSeg !== null ? ' · ' + nf0.format(g.uniSeg) + ' unid' : ''}</b> <span class="cli" title="Se suma el consolidador solicitado + el mayor entre el 1821 del 050 y el tránsito a stacking + consolidado de la hoja Datos">(${esc(nomC(g.consSol) || 'consolidador')} ${fmt((g.ces || {})[g.consSol] || 0)} + máx[1821 ${fmt((g.ces || {})['1821'] || 0)} · tráns/consol. Datos ${fmt(g.tc || 0)}])</span></span>`) +
     (g.fal > 0.0005
       ? `<span class="neg">Falta por llegar: <b>${g.falU !== null ? nf0.format(g.falU) + ' unid · ' : ''}${fmt(g.fal)} t${g.contAf ? ' ≈ ' + g.contAf + ' cont' : ' (alerta, no alcanza a afectar un contenedor)'}</b></span>`
       : '<span>Sin faltante: lo solicitado ya está en el consolidador ✅</span>') + '</div>';
@@ -2325,8 +2330,11 @@ function riesgoModal(gk){
   const cs = Object.keys(g.ces || {}).filter(c => g.ces[c] > 0.0005).sort((a, b) => g.ces[b] - g.ces[a]);
   if (cs.length){
     cs.forEach(c => {
-      const ok = c === g.consSol || c === '1821';
-      h += `<tr class="det"><td class="mono">${esc(c)}</td><td>${esc(nomC(c))}${c === g.consSol ? ' <span class="cli">(solicitado)</span>' : ''}</td><td class="num">${fmt(g.ces[c])}</td><td>${ok ? '<span class="pill ok">Seguro</span>' : '<span class="pill bad">En riesgo</span>'}</td></tr>`;
+      let est;
+      if (c === '1821') est = '<span class="pill ok">Seguro</span>';
+      else if (c === g.consSol) est = g.yaPaso ? '<span class="pill bad">Quedó — corte pasado</span>' : '<span class="pill ok">Seguro</span>';
+      else est = '<span class="pill bad">En riesgo</span>';
+      h += `<tr class="det"><td class="mono">${esc(c)}</td><td>${esc(nomC(c))}${c === g.consSol ? ' <span class="cli">(solicitado)</span>' : ''}</td><td class="num">${fmt(g.ces[c])}</td><td>${est}</td></tr>`;
     });
   } else h += '<tr class="det"><td colspan="4" class="cli">El 050 no muestra stock en centros para estos pedidos.</td></tr>';
   h += '</tbody></table>';
