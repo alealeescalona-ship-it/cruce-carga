@@ -2171,7 +2171,7 @@ function riesgoModal(gk){
   if (!g) return;
   const nomC = c => RIESGO_NOM[c] || c;
   let h = `<div class="chsel" style="margin:10px 12px"><span>Solicitado 050: <b>${nf0.format(g.uniSol)} unid</b> · <b>${fmt(g.tonSol)} t</b></span><span>Contenedores: <b>${g.cont}</b>${g.tpc > 0 ? ' (~' + fmt(g.tpc) + ' t/cont)' : ''}</span><span>Consolidador solicitado: <b>${esc(nomC(g.consSol) || '—')}</b></span>` +
-    `<span>Ya seguro: <b>${fmt(g.seguro)} t${g.uniSeg !== null ? ' · ' + nf0.format(g.uniSeg) + ' unid' : ''}</b></span>` +
+    `<span>Ya seguro: <b>${fmt(g.seguro)} t${g.uniSeg !== null ? ' · ' + nf0.format(g.uniSeg) + ' unid' : ''}</b> <span class="cli">(${esc(nomC(g.consSol) || 'consolidador')} ${fmt((g.ces || {})[g.consSol] || 0)} + 1821 ${fmt((g.ces || {})['1821'] || 0)})</span></span>` +
     (g.fal > 0.0005
       ? `<span class="neg">Falta por llegar: <b>${g.falU !== null ? nf0.format(g.falU) + ' unid · ' : ''}${fmt(g.fal)} t${g.contAf ? ' ≈ ' + g.contAf + ' cont' : ' (alerta, no alcanza a afectar un contenedor)'}</b></span>`
       : '<span>Sin faltante: lo solicitado ya está en el consolidador ✅</span>') + '</div>';
