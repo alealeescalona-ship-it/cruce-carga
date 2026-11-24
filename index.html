@@ -225,6 +225,7 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
       <button class="tab" id="mt_resumen" onclick="setMain('resumen')">⭐ Resumen</button>
       <button class="tab active" id="mt_carga" onclick="setMain('carga')">📦 Carga</button>
       <button class="tab" id="mt_prio" onclick="setMain('prio')">🚢 Prioridades naves</button>
+      <button class="tab" id="mt_riesgo" onclick="setMain('riesgo')">🧯 Cargas en riesgo</button>
       <button class="tab" id="mt_stock" onclick="setMain('stock')">🧱 Stock 073</button>
       <button class="tab" id="mt_plan" onclick="setMain('plan')">📋 Planificación</button>
       <div class="navlbl">Herramientas</div>
@@ -388,6 +389,19 @@ td input.cell:focus{border-color:var(--brand);box-shadow:var(--glow)}
     <div class="tblbox"><div id="tblPrio050"></div></div>
     <div class="secttl">🚨 Pallets siames con stock en planta</div>
     <div class="tblbox"><div id="tblSiames"></div></div>
+  </section>
+
+  <!-- ============ TAB CARGAS EN RIESGO ============ -->
+  <section id="sec_riesgo" style="display:none">
+    <p class="note">Cruce <b>Datos + 050</b> por pedido/posición (en el 050 vienen juntos, ej. OE00100/2). Embarques <b>marítimos · status SM Pendiente</b> con corte documental entre <b>2 días antes y 2 días después de hoy</b>. El stock que ya está en el <b>consolidador solicitado</b> (Centro Destino del 050) o en <b>1821</b> no es riesgo; lo pendiente en otros centros (1801, 1802, 1803 Cerrillos, 1807 Bod. Nacional, 1808 La Divisa, 1829 DYC THNO, 1890, 1893, 1826…) <b>sí lo es</b>. Contenedores afectados ≈ ton en riesgo ÷ (ton solicitadas ÷ contenedores solicitados). <b>Doble clic en una fila</b> = dónde está el stock.</p>
+    <div class="ctrl"><div class="filters">
+      <select id="fRgoVer" onchange="renderRiesgo()">
+        <option value="r">Solo embarques con riesgo</option>
+        <option value="t">Todos los de la ventana de corte</option>
+      </select>
+      <span class="prog" id="rgoResumen" style="margin-left:auto;font-size:12px"></span>
+    </div></div>
+    <div class="tblbox"><div id="tblRiesgo"></div></div>
   </section>
 
   <!-- ============ TAB STOCK 073 ============ -->
@@ -1068,8 +1082,10 @@ function ingestDetalle(aoa, fname){
     cSai: col('dyc sai'), cPcv: col('pto columbo vap'), cThno: col('dyc thno'),
     cCor: col('coronel'), cBod: col('stock bod nacionales'),
     ge: col('cant entrega ton'), py: col('ton producido ov'), fr: col('fecha fin ready'),
-    ent2: col('entrega'), ntr: col('n transporte'), fzr: col('fecha zarpe real')
+    ent2: col('entrega'), ntr: col('n transporte'), fzr: col('fecha zarpe real'),
+    ncont: col('n contenedores')
   };
+  const riesgoRows = [];
   // Solo los 4 consolidadores (Maule y Valdivia son plantas, quedan fuera de esta alerta)
   const CONS_COLS = [['cSai','DYC SAI'], ['cPcv','PC VALP'], ['cCor','CORONEL'], ['cBod','BOD. NACIONAL']];
   const alertMap = {};
@@ -1131,9 +1147,21 @@ function ingestDetalle(aoa, fname){
         });
       }
     }
-    if (ma <= 0 && va <= 0) continue;
     // n transporte: columna por encabezado 'n transporte' y, si viniera vacia, BK (63) como respaldo
     const ntrP = (C.ntr >= 0 && a[C.ntr] != null && String(a[C.ntr]).trim() !== '') ? a[C.ntr] : a[62];
+    // Cargas en riesgo: TODAS las posiciones maritimas con embarque real y status Pendiente (aunque no tengan stock en planta)
+    if (String(a[C.et] || '').trim() !== 'SI' && String(a[C.st] || '').trim() === 'Pendiente'){
+      const ncI = C.ncont >= 0 ? C.ncont : 61;
+      riesgoRows.push({
+        ntr: String(ntrP == null ? '' : ntrP).trim().replace(/\.0$/, ''),
+        nave: String(a[C.nave] || '').trim(), fcd: dstr(a[C.fcd]),
+        paisd: String(a[C.paisd] || '').trim(), cli: String(a[C.cli] || '').trim(),
+        ped: String(a[C.ped] || '').trim(), pos: String(a[C.pos] || '').trim().replace(/^0+/, ''),
+        ent: String(a[C.ent2] == null ? '' : a[C.ent2]).trim(),
+        nc: numv(a[ncI]), ge: r3(numv(a[C.ge]))
+      });
+    }
+    if (ma <= 0 && va <= 0) continue;
     rows.push({
       grp: String(a[C.et] || '').trim() === 'SI' ? 'N' : 'G',
       st: String(a[C.st] || '').trim(),
@@ -1170,7 +1198,7 @@ function ingestDetalle(aoa, fname){
   });
   const saldos = Object.values(salMap);
   saldos.sort((a, b) => (a.sem + a.nave).localeCompare(b.sem + b.nave));
-  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready, saldos: saldos};
+  DET = {file: fname, corte: m ? m[1] : dateToISO(new Date()), rows: rows, alert: alert, falta: falta, ready: ready, saldos: saldos, riesgo: riesgoRows};
 }
 // Semana martes a lunes: martes de inicio como clave; numero = semana ISO del martes - 1 (regla del usuario)
 function isoWeek(d){
@@ -1533,8 +1561,12 @@ function ingest050(aoa, fname){
   const C = {
     nave: col('nave o patente'), fdest: col('fecha en destino'), cons: col('centro destino'),
     ped: col('ped.cliente/pos'), pesoSol: col('peso solicitud'), desc: col('descripcion'),
-    unidad: col('unidad'), pMa: col('peso ce.1801-002'), pVa: col('peso ce.1802-002'), cli: col('nombre cliente')
+    unidad: col('unidad'), pMa: col('peso ce.1801-002'), pVa: col('peso ce.1802-002'), cli: col('nombre cliente'),
+    uniSol: col('ctd unit. sol.')
   };
+  // columnas "Peso Ce.XXXX-..." (pesos por centro, para cargas en riesgo): se detectan todas
+  const ceCols = [];
+  heads.forEach((h, i) => { const mm = h.match(/^peso ce\.(\d{4})/); if (mm) ceCols.push([i, mm[1]]); });
   const rows = [];
   for (let r = 1; r < aoa.length; r++){
     const a = aoa[r]; if (!a) continue;
@@ -1547,11 +1579,15 @@ function ingest050(aoa, fname){
     let ma = numv(a[C.pMa]), va = numv(a[C.pVa]);
     if (pesoSol > 0 && ma + va > pesoSol){ const fq = pesoSol / (ma + va); ma *= fq; va *= fq; }
     const desc = String(a[C.desc] || '').trim();
+    const ce = {};
+    ceCols.forEach(([i, c]) => { const v = numv(a[i]); if (v > 0) ce[c] = r3((ce[c] || 0) + v); });
     rows.push({cons, nave: String(a[C.nave] || '').trim(), fdest: dstr(a[C.fdest]),
       ped: String(a[C.ped] || '').trim(), cli: String(a[C.cli] || '').trim(),
       ma: r3(ma), va: r3(va), desc, siames: /SIAMES/i.test(desc), unidad: String(a[C.unidad] || '').trim(),
       // n° de transporte del 050: columna A (indicado por el usuario)
-      ntr: String(a[0] == null ? '' : a[0]).trim().replace(/\.0$/, '')});
+      ntr: String(a[0] == null ? '' : a[0]).trim().replace(/\.0$/, ''),
+      // para cargas en riesgo: centro destino crudo, unidades/ton solicitadas y pesos por centro
+      consCod, uniSol: numv(a[C.uniSol]), sol: r3(pesoSol), ce});
   }
   const m = fname.match(/(\d{4}-\d{2}-\d{2})/);
   E050 = {file: fname, fecha: m ? m[1] : dateToISO(new Date()), rows};
@@ -1933,6 +1969,158 @@ function prio050Modal(cons, nave, sem){
   if (rows.length && rows[0].ntr === undefined) h = '<p class="note" style="padding:10px 12px 0">El n° de transporte (columna A del 050) se guarda desde ahora: vuelve a subir el 050 de hoy para verlo.</p>' + h;
   openModal(`📌 ${esc(nave)} — ${esc(cons)} <span class="cli">· pendiente de embarcar (050)</span>`, h, xlsDef('Nave 050 ' + nave + ' ' + cons, aoa));
 }
+// ================== CARGAS EN RIESGO (cruce Datos + 050 por pedido/posicion) ==================
+const RIESGO_NOM = {'1801':'Planta Maule','1802':'Planta Valdivia','1803':'Cerrillos','1807':'Bodega Nacional','1808':'La Divisa','1822':'1822','1826':'Puerto Coronel','1828':'1828','1829':'DYC THNO','1861':'Internacional','1890':'DYC SAI','1893':'PC Valp'};
+let RGO_LIST = [];
+function rgoKeyDatos(ped, pos){
+  const p = parseInt(pos, 10);
+  return String(ped || '').trim().toUpperCase() + '/' + (isNaN(p) ? String(pos || '').trim() : p);
+}
+function riesgoData(){
+  const hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+  const idx = {};
+  ((E050 && E050.rows) || []).forEach(r => {
+    if (r.ce === undefined) return;
+    const sp = String(r.ped || '');
+    const sl = sp.indexOf('/');
+    const k = sl >= 0 ? rgoKeyDatos(sp.slice(0, sl), sp.slice(sl + 1)) : rgoKeyDatos(sp, '');
+    (idx[k] = idx[k] || []).push(r);
+  });
+  const grupos = {};
+  ((DET && DET.riesgo) || []).forEach(x => {
+    if (!x.fcd) return;
+    const diff = Math.round((isoToDate(x.fcd) - hoy0) / 86400000);
+    if (diff < -2 || diff > 2) return;   // ventana: 2 dias antes del corte, el mismo dia y 2 despues
+    const gk = x.ntr ? 'T' + x.ntr : 'N' + x.nave + '||' + x.fcd;
+    const g = grupos[gk] || (grupos[gk] = {gk, ntr: x.ntr, nave: x.nave, fcd: x.fcd, paisd: x.paisd, clis: [], ents: {}, ge: 0, keys: []});
+    if (x.fcd < g.fcd) g.fcd = x.fcd;
+    if (x.cli && !g.clis.includes(x.cli)) g.clis.push(x.cli);
+    if (!g.paisd && x.paisd) g.paisd = x.paisd;
+    g.ge = r3(g.ge + x.ge);
+    const ek = x.ent || ('p' + x.ped + '/' + x.pos);
+    g.ents[ek] = Math.max(g.ents[ek] || 0, x.nc || 0);   // contenedores por entrega (sin duplicar)
+    const k = rgoKeyDatos(x.ped, x.pos);
+    if (!g.keys.includes(k)) g.keys.push(k);
+  });
+  const list = Object.values(grupos).map(g => {
+    g.cont = Math.round(Object.values(g.ents).reduce((a, b) => a + b, 0));
+    let uniSol = 0, tonSol = 0, consSol = '', sin050 = 0;
+    const ces = {};
+    const itemsDet = [];
+    g.keys.forEach(k => {
+      const items = idx[k];
+      if (!items || !items.length){ sin050++; itemsDet.push({k, uni: 0, sol: 0, fuera: 0, sin: true}); return; }
+      let iu = 0, is = 0;
+      const ice = {};
+      items.forEach(r => {
+        iu += r.uniSol || 0; is = r3(is + (r.sol || 0));
+        if (!consSol && r.consCod) consSol = r.consCod;
+        Object.keys(r.ce || {}).forEach(c => { ces[c] = r3((ces[c] || 0) + r.ce[c]); ice[c] = r3((ice[c] || 0) + r.ce[c]); });
+      });
+      uniSol += iu; tonSol = r3(tonSol + is);
+      itemsDet.push({k, uni: iu, sol: is, ice});
+    });
+    let seguro = 0, riesgo = 0;
+    Object.keys(ces).forEach(c => {
+      const v = ces[c];
+      if (v <= 0.0005) return;
+      if (c === consSol || c === '1821') seguro = r3(seguro + v);
+      else riesgo = r3(riesgo + v);
+    });
+    itemsDet.forEach(it => {
+      if (it.sin || !it.ice) return;
+      let f = 0;
+      Object.keys(it.ice).forEach(c => { if (c !== consSol && c !== '1821') f = r3(f + it.ice[c]); });
+      it.fuera = f;
+    });
+    const tpc = g.cont > 0 && tonSol > 0 ? tonSol / g.cont : 0;
+    const contAf = tpc > 0 && riesgo > 0.0005 ? Math.min(g.cont, Math.ceil(riesgo / tpc - 0.02)) : 0;
+    return Object.assign(g, {uniSol: Math.round(uniSol), tonSol, consSol, sin050, ces, seguro, riesgo, tpc, contAf, con050: g.keys.length - sin050, itemsDet});
+  });
+  list.sort((a, b) => a.fcd.localeCompare(b.fcd) || b.riesgo - a.riesgo);
+  return list;
+}
+function riesgoAoa(soloRiesgo){
+  const aoa = [['Transporte','Nave','Corte doc','Pais destino','Cliente','Cont solicitados','Ton entrega','Unid sol 050','Ton sol 050','Ton en riesgo','Cont afectados','Consolidador solicitado']];
+  riesgoData().forEach(x => {
+    if (soloRiesgo && x.riesgo <= 0.0005) return;
+    aoa.push([x.ntr, x.nave, x.fcd, x.paisd, x.clis.join(' / '), x.cont, r3(x.ge), x.uniSol, r3(x.tonSol), r3(x.riesgo), x.contAf, RIESGO_NOM[x.consSol] || x.consSol || '']);
+  });
+  return aoa;
+}
+function renderRiesgo(){
+  const el = $('tblRiesgo'), res = $('rgoResumen');
+  res.textContent = '';
+  if (!DET || !E050){
+    el.innerHTML = '<div class="empty">Sube el <b>detalle de cartulinas</b> y el <b>050</b> del día para armar este cruce.<br><br><button class="btn" onclick="openUpload()">⬆ Subir archivos</button></div>';
+    return;
+  }
+  if (!DET.riesgo){ el.innerHTML = '<div class="empty">El detalle guardado es de una versión anterior: <b>vuelve a subir el detalle de cartulinas de hoy</b>.</div>'; return; }
+  if (!E050.rows.length || E050.rows[0].ce === undefined){ el.innerHTML = '<div class="empty">El 050 guardado es de una versión anterior: <b>vuelve a subir el 050 de hoy</b> (se necesitan sus columnas Peso Ce. por centro).</div>'; return; }
+  const hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+  RGO_LIST = riesgoData();
+  const conR = RGO_LIST.filter(x => x.riesgo > 0.0005);
+  const list = $('fRgoVer').value === 't' ? RGO_LIST : conR;
+  res.textContent = RGO_LIST.length + ' embarques con corte hoy ±2 días · ' + conR.length + ' con stock en riesgo';
+  if (!list.length){
+    el.innerHTML = '<div class="empty">' + (RGO_LIST.length ? 'Sin embarques con stock en riesgo en la ventana de corte ✅' : 'Sin embarques marítimos pendientes con corte documental entre hoy −2 y hoy +2 ✅') + '</div>';
+    return;
+  }
+  let h = '<table><thead><tr><th>Transporte</th><th>Nave</th><th>Corte doc.</th><th>País destino</th><th>Cliente</th><th class="num">Cont. sol.</th><th class="num">Ton entrega</th><th class="num">Unid. sol. 050</th><th class="num">Ton sol. 050</th><th class="num">Ton en riesgo</th><th class="num">Cont. afectados</th></tr></thead><tbody>';
+  let tGe = 0, tSol = 0, tRgo = 0, tAf = 0, tCont = 0;
+  list.forEach(x => {
+    const dd = Math.round((isoToDate(x.fcd) - hoy0) / 86400000);
+    const pc = dd < 0 ? 'pill bad' : (dd === 0 ? 'pill warn' : 'pill soon');
+    const lbl = dd < 0 ? ' (hace ' + (-dd) + 'd)' : (dd === 0 ? ' (HOY)' : ' (+' + dd + 'd)');
+    tGe += x.ge; tCont += x.cont;
+    h += `<tr class="det" style="cursor:pointer" title="Doble clic: ver dónde está el stock de este embarque" ondblclick="riesgoModal(this.dataset.k)" data-k="${esc(x.gk)}">` +
+      `<td class="mono">${esc(x.ntr) || '—'}</td><td><b>${esc(x.nave) || '—'}</b></td><td><span class="${pc} mono"><b>${fdate(x.fcd)}</b>${lbl}</span></td>` +
+      `<td>${esc(x.paisd) || '—'}</td><td>${esc(x.clis[0] || '')}${x.clis.length > 1 ? ' <span class="cli">+' + (x.clis.length - 1) + '</span>' : ''}</td>` +
+      `<td class="num">${x.cont || '—'}</td><td class="num">${fmt(x.ge)}</td>`;
+    if (x.con050){
+      tSol = r3(tSol + x.tonSol); tRgo = r3(tRgo + x.riesgo); tAf += x.contAf;
+      h += `<td class="num">${nf0.format(x.uniSol)}</td><td class="num">${fmt(x.tonSol)}</td>` +
+        `<td class="num">${x.riesgo > 0.0005 ? '<span class="neg"><b>' + fmt(x.riesgo) + '</b></span>' : '<span class="z">0</span>'}</td>` +
+        `<td class="num">${x.contAf ? '<span class="pill bad"><b>' + x.contAf + '</b></span>' : '—'}</td></tr>`;
+    } else {
+      h += '<td colspan="4" class="cli">pedido no aparece en el 050</td></tr>';
+    }
+  });
+  h += `<tr class="tot"><td colspan="5">Total (${list.length} embarques)</td><td class="num">${tCont}</td><td class="num">${fmt(tGe)}</td><td></td><td class="num">${fmt(tSol)}</td><td class="num">${fmt(tRgo)}</td><td class="num">${tAf}</td></tr></tbody></table>`;
+  el.innerHTML = h;
+}
+function riesgoModal(gk){
+  const g = RGO_LIST.find(x => x.gk === gk);
+  if (!g) return;
+  const nomC = c => RIESGO_NOM[c] || c;
+  let h = `<div class="chsel" style="margin:10px 12px"><span>Solicitado 050: <b>${nf0.format(g.uniSol)} unid</b> · <b>${fmt(g.tonSol)} t</b></span><span>Contenedores: <b>${g.cont}</b>${g.tpc > 0 ? ' (~' + fmt(g.tpc) + ' t/cont)' : ''}</span><span>Consolidador solicitado: <b>${esc(nomC(g.consSol) || '—')}</b></span>` +
+    (g.riesgo > 0.0005 ? `<span class="neg">En riesgo: <b>${fmt(g.riesgo)} t ≈ ${g.contAf} cont</b></span>` : '<span>Sin stock en riesgo ✅</span>') + '</div>';
+  h += '<div class="seclbl" style="margin:0 12px 4px">Dónde está el stock (050)</div>';
+  h += '<table><thead><tr><th>Centro</th><th>Ubicación</th><th class="num">Ton</th><th>Estado</th></tr></thead><tbody>';
+  const cs = Object.keys(g.ces || {}).filter(c => g.ces[c] > 0.0005).sort((a, b) => g.ces[b] - g.ces[a]);
+  if (cs.length){
+    cs.forEach(c => {
+      const ok = c === g.consSol || c === '1821';
+      h += `<tr class="det"><td class="mono">${esc(c)}</td><td>${esc(nomC(c))}${c === g.consSol ? ' <span class="cli">(solicitado)</span>' : ''}</td><td class="num">${fmt(g.ces[c])}</td><td>${ok ? '<span class="pill ok">Seguro</span>' : '<span class="pill bad">En riesgo</span>'}</td></tr>`;
+    });
+  } else h += '<tr class="det"><td colspan="4" class="cli">El 050 no muestra stock en centros para estos pedidos.</td></tr>';
+  h += '</tbody></table>';
+  h += '<div class="seclbl" style="margin:10px 12px 4px">Pedidos / posiciones del embarque</div>';
+  h += '<table><thead><tr><th>Pedido/Pos</th><th class="num">Unid. sol.</th><th class="num">Ton sol.</th><th class="num">Ton fuera del consolidador</th></tr></thead><tbody>';
+  const aoa = [['Pedido/Pos','Unid sol','Ton sol','Ton en riesgo','Estado']];
+  g.itemsDet.slice().sort((a, b) => (b.fuera || 0) - (a.fuera || 0)).forEach(it => {
+    if (it.sin){
+      h += `<tr class="det"><td class="mono">${esc(it.k)}</td><td colspan="3" class="cli">no aparece en el 050</td></tr>`;
+      aoa.push([it.k, '', '', '', 'No esta en el 050']);
+    } else {
+      h += `<tr class="det"><td class="mono">${esc(it.k)}</td><td class="num">${nf0.format(it.uni)}</td><td class="num">${fmt(it.sol)}</td><td class="num">${it.fuera > 0.0005 ? '<span class="neg"><b>' + fmt(it.fuera) + '</b></span>' : '<span class="z">0</span>'}</td></tr>`;
+      aoa.push([it.k, it.uni, r3(it.sol), r3(it.fuera || 0), it.fuera > 0.0005 ? 'En riesgo' : 'OK']);
+    }
+  });
+  h += `<tr class="tot"><td>Total</td><td class="num">${nf0.format(g.uniSol)}</td><td class="num">${fmt(g.tonSol)}</td><td class="num">${fmt(g.riesgo)}</td></tr></tbody></table>`;
+  aoa.push(['Total', g.uniSol, r3(g.tonSol), r3(g.riesgo), '']);
+  openModal(`🧯 ${esc(g.nave) || 'Embarque'} — transporte ${esc(g.ntr) || '—'} <span class="cli">· corte ${fdate(g.fcd)}</span>`, h, xlsDef('Riesgo ' + (g.ntr || g.nave), aoa));
+}
 function deco(t){
   const v = t === 'radar' || t === 'dotsWarn' ? '180,83,9' : '0,168,107';
   const s = `<svg class="ring" width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">`;
@@ -1978,7 +2166,7 @@ function kpis(){
 
 function setMain(m){
   MAIN = m;
-  ['resumen','carga','prio','stock','sim','cie','plan'].forEach(x => {
+  ['resumen','carga','prio','riesgo','stock','sim','cie','plan'].forEach(x => {
     $('mt_' + x).classList.toggle('active', x === m);
     let show = x === m;
     if (x === 'carga' && !DET) show = false;
@@ -1987,6 +2175,7 @@ function setMain(m){
   if (m === 'resumen') renderResumen();
   if (m === 'carga' && DET){ renderFaltaCarga(); if (TAB === 'A'){ setTab('A'); } else if (TAB === 'S'){ setTab('S'); } else { refreshSelects(); render(); } }
   if (m === 'prio'){ renderPrio(); renderPrio050(); }
+  if (m === 'riesgo') renderRiesgo();
   if (m === 'stock') renderStock();
   if (m === 'sim') renderSim();
   if (m === 'cie') renderCierres();
@@ -3527,6 +3716,10 @@ function buildExport(){
     out['No gestionada'] = [['Consolidador','Pais dest','Pedido','Cliente','Producto','Servicio TBN','F zarpe plan','Maule t','Valdivia t','Status','Revisado']]
       .concat(aggPed(nRows()).map(p => [p.cons, p.paisd, p.ped, p.cli, p.prods.join(' / '), p.nave, p.fzp, r3(p.ma), r3(p.va), p.sts.join('/'), CHECKS[p.ped] ? 'SI' : 'NO']));
     out['Prioridades'] = prioAoa();
+    if (E050 && DET.riesgo && E050.rows.length && E050.rows[0].ce !== undefined){
+      const rg = riesgoAoa(false);
+      if (rg.length > 1) out['Cargas en riesgo'] = rg;
+    }
     const fa = faltaAoa();
     if (fa.length > 1) out['Falta produccion'] = fa;
     const ry = readyAoa();
@@ -3692,6 +3885,7 @@ const HOJAS_TAB = {
   resumen: n => ['Resumen stock grupos','Stock por año','Saldos por centro','Naves urgentes','Ready vs corte','Pila Rollo 050'].includes(n),
   carga: n => ['Resumen gestionada','Resumen no gestionada','Gestionada','No gestionada','Falta produccion','Saldos contabilizados'].includes(n),
   prio: n => ['Prioridades','Naves urgentes','Prioridades 050','Pallets siames'].includes(n),
+  riesgo: n => n === 'Cargas en riesgo',
   stock: n => ['Stock 073','Stock por año','Carga antigua','Semielaborado SEMI','Stock P09'].includes(n) || n.startsWith('Antiguedad'),
   sim: n => ['Simulador','Historico 073'].includes(n),
   cie: n => ['Cierres resumen','Cierres detalle','Saldos por centro'].includes(n),
@@ -3858,6 +4052,12 @@ function exportPDF(){
     }
     if (!sections.length) return toast('Sube el detalle o el 050 primero');
     fname = 'prioridades'; titulo = 'Prioridades naves para plantas';
+  } else if (MAIN === 'riesgo'){
+    if (!DET || !DET.riesgo || !E050 || !E050.rows.length || E050.rows[0].ce === undefined) return toast('Sube el detalle y el 050 de hoy primero');
+    const rg = riesgoAoa(false);
+    if (rg.length <= 1) return toast('Sin embarques en la ventana de corte hoy ±2 días');
+    sections = [['Cargas en riesgo (corte documental hoy ±2 días · riesgo = stock fuera del consolidador solicitado o 1821)', rg]];
+    fname = 'cargas_riesgo'; titulo = 'Cargas en riesgo de caerse';
   } else if (MAIN === 'desp'){
     if (!SAP) return toast('Sube la 078 primero');
     sections = [['Despachos por centro (UT = t ÷ ' + CFG.tDesp + ')', despAoa()]];
